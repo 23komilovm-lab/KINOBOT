@@ -41,7 +41,8 @@ model Tariff {
   id         Int     @id @default(autoincrement())
   label      String  // masalan "1 oy"
   days       Int     // premium davomiyligi (kun)
-  price      Int     // narx (so'm)
+  price      Int     // hozirgi (chegirmali) narx (so'm)
+  oldPrice   Int?    // eski narx — ustidan chizilgan holda ko'rsatiladi (null = ko'rsatilmaydi)
   starsPrice Int?    // Telegram Stars narxi (null = Stars orqali sotib olib bo'lmaydi)
   sortOrder  Int     @default(0)
   isActive   Boolean @default(true)

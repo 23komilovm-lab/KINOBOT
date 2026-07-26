@@ -4,7 +4,7 @@ import { adminCan } from "../../config.js";
 import { e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, kb, BE } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
-import { grantPremium, seedDefaultTariffs } from "../../utils/premium.js";
+import { grantPremium, seedDefaultTariffs, resetToDefaultTariffs } from "../../utils/premium.js";
 import type { MyContext } from "../../types.js";
 
 export const premiumAdminHandler = new Composer<MyContext>();
@@ -165,7 +165,9 @@ async function renderTariffs(ctx: MyContext) {
   const tariffs = await prisma.tariff.findMany({ orderBy: { sortOrder: "asc" } });
   const lines = tariffs.length
     ? tariffs.map((t) =>
-        `${t.isActive ? "🟢" : "🔴"} <b>${e.escapeHtml(t.label)}</b> — ${t.price.toLocaleString("ru-RU")} so'm · ${t.days} kun` +
+        `${t.isActive ? "🟢" : "🔴"} <b>${e.escapeHtml(t.label)}</b> — ` +
+        (t.oldPrice && t.oldPrice > t.price ? `<s>${t.oldPrice.toLocaleString("ru-RU")}</s> ` : "") +
+        `${t.price.toLocaleString("ru-RU")} so'm · ${t.days} kun` +
         (t.starsPrice ? ` · ⭐ ${t.starsPrice}` : ` · ⭐ <i>sozlanmagan</i>`)
       ).join("\n")
     : "Hozircha tarif yo'q.";
@@ -175,12 +177,15 @@ async function renderTariffs(ctx: MyContext) {
   ]]);
   rows.push([ibtn("➕ Tarif qo'shish", "prm:tadd", "success")]);
   if (tariffs.length === 0) rows.push([ibtn("✨ Namuna tariflar qo'shish", "prm:tseed", "primary")]);
+  rows.push([ibtn("🔥 Aksiya narxlarini qo'yish (5000 so'm/oy)", "prm:treset", "success")]);
   if (tariffs.some((t) => !t.starsPrice)) {
     rows.push([ibtn("⭐ Stars narxlarini avtomatik belgilash", "prm:tstarsauto", "success")]);
   }
   rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
   await ctx.editMessageText(
-    `🏷 <b>Tariflar</b>\n\n${lines}\n\n<i>Format: Nom | kun | narx | (ixtiyoriy) stars</i>`,
+    `🏷 <b>Tariflar</b>\n\n${lines}\n\n` +
+    `<i>Format: Nom | kun | narx | (ixtiyoriy) eski narx | (ixtiyoriy) stars\n` +
+    `Eski narx foydalanuvchiga ustidan chizilgan holda ko'rsatiladi.</i>`,
     { reply_markup: kb(...rows) }
   ).catch(() => {});
 }
@@ -200,12 +205,23 @@ premiumAdminHandler.callbackQuery("prm:tseed", async (ctx) => {
   await renderTariffs(ctx);
 });
 
+// Aksiya narxlarini majburan qayta yozadi (mavjud tariflar o'rniga)
+premiumAdminHandler.callbackQuery("prm:treset", async (ctx) => {
+  await resetToDefaultTariffs();
+  await ctx.answerCallbackQuery({ text: "🔥 Aksiya narxlari qo'yildi (5 000 / 12 000 / 36 000 so'm).", show_alert: true });
+  await renderTariffs(ctx);
+});
+
 premiumAdminHandler.callbackQuery("prm:tadd", async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmAddTariff: true };
   await ctx.reply(
-    `➕ <b>Yangi tarif</b>\n\nQuyidagi formatda yuboring:\n<code>Nom | kun | narx | (ixtiyoriy) stars</code>\n\n` +
-    `Masalan: <code>1 oy | 30 | 15000</code> yoki <code>1 oy | 30 | 15000 | 500</code>`
+    `➕ <b>Yangi tarif</b>\n\nQuyidagi formatda yuboring:\n` +
+    `<code>Nom | kun | narx | eski narx | stars</code>\n` +
+    `(eski narx va stars — ixtiyoriy)\n\n` +
+    `Masalan: <code>1 oy | 30 | 5000</code>\n` +
+    `yoki chegirma bilan: <code>1 oy | 30 | 5000 | 25000</code>\n` +
+    `yoki stars bilan: <code>1 oy | 30 | 5000 | 25000 | 35</code>`
   );
 });
 
@@ -369,15 +385,23 @@ premiumAdminHandler.on("message:text", async (ctx, next) => {
     const label = parts[0];
     const days = parseInt(parts[1], 10);
     const price = parseInt(parts[2], 10);
-    const starsPrice = parts[3] ? parseInt(parts[3], 10) : null;
-    if (!label || Number.isNaN(days) || Number.isNaN(price) || (parts[3] && Number.isNaN(starsPrice))) {
-      await ctx.reply("❌ Format xato. Namuna: <code>1 oy | 30 | 15000</code>");
+    const oldPrice = parts[3] ? parseInt(parts[3], 10) : null;
+    const starsPrice = parts[4] ? parseInt(parts[4], 10) : null;
+    if (
+      !label || Number.isNaN(days) || Number.isNaN(price) ||
+      (parts[3] && Number.isNaN(oldPrice)) || (parts[4] && Number.isNaN(starsPrice))
+    ) {
+      await ctx.reply("❌ Format xato. Namuna: <code>1 oy | 30 | 5000 | 25000</code>");
       return;
     }
     const count = await prisma.tariff.count();
-    await prisma.tariff.create({ data: { label: label.slice(0, 40), days, price, starsPrice, sortOrder: count } });
+    await prisma.tariff.create({
+      data: { label: label.slice(0, 40), days, price, oldPrice, starsPrice, sortOrder: count },
+    });
     await ctx.reply(
-      `✅ Tarif qo'shildi: <b>${e.escapeHtml(label)}</b> — ${price.toLocaleString("ru-RU")} so'm · ${days} kun` +
+      `✅ Tarif qo'shildi: <b>${e.escapeHtml(label)}</b> — ` +
+      (oldPrice && oldPrice > price ? `<s>${oldPrice.toLocaleString("ru-RU")}</s> ` : "") +
+      `${price.toLocaleString("ru-RU")} so'm · ${days} kun` +
       (starsPrice ? ` · ⭐ ${starsPrice}` : "")
     );
     return;

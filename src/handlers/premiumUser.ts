@@ -26,7 +26,9 @@ export async function sendPremiumPrompt(ctx: MyContext, reason?: string, edit = 
     `✅ <b>Cheksiz</b> kino va serial — limitsiz\n` +
     `✅ <b>Majburiy obunasiz</b> — hech qanday kanal so'ralmaydi\n` +
     `✅ <b>Cheksiz AI yordamchi</b> — tavsiya + rasm orqali kino topish\n` +
-    `✅ Reklama va kutishlarsiz, eng tez xizmat\n\n`;
+    `✅ Reklama va kutishlarsiz, eng tez xizmat\n\n` +
+    `🔥 <b>MAXSUS TAKLIF — faqat siz uchun shu narxda!</b>\n` +
+    `<i>Aksiya muddati cheklangan, shoshiling.</i>\n\n`;
 
   if (tariffs.length === 0) {
     const text = head + `Hozircha tariflar sozlanmagan. Admin bilan bog'laning.`;
@@ -51,9 +53,18 @@ export async function sendPremiumPrompt(ctx: MyContext, reason?: string, edit = 
     const priceStr = t.price.toLocaleString("ru-RU");
     const perDayStr = Math.round(pd).toLocaleString("ru-RU");
 
-    let info = `• <b>${e.escapeHtml(t.label)}</b> — ${priceStr} so'm  <i>(${perDayStr} so'm/kun)</i>`;
+    // Eski narx bo'lsa — ustidan chizib ko'rsatamiz + chegirma foizi
+    const hasOld = t.oldPrice != null && t.oldPrice > t.price;
+    const oldStr = hasOld ? t.oldPrice!.toLocaleString("ru-RU") : "";
+    const offPct = hasOld ? Math.round((1 - t.price / t.oldPrice!) * 100) : 0;
+
+    let info = `• <b>${e.escapeHtml(t.label)}</b> — `;
+    if (hasOld) info += `<s>${oldStr}</s> `;
+    info += `<b>${priceStr} so'm</b>`;
+    if (hasOld) info += ` 🎁 <b>-${offPct}%</b>`;
+    info += `\n   <i>${perDayStr} so'm/kun</i>`;
     if (isBest) info += `  ⭐️ <b>eng foydali</b>`;
-    else if (saving >= 5) info += `  💰 ${saving}% tejash`;
+    else if (saving >= 5) info += `  💰 yana ${saving}% tejash`;
     lines.push(info);
 
     const btnLabel = isBest
@@ -120,11 +131,19 @@ premiumHandler.callbackQuery(/^prem:buy:(\d+)$/, async (ctx) => {
   rows.push([ibtn("⬅️ Orqaga", "prem:show", undefined, BE.backMenu)]);
 
   await ctx.editMessageText(
-    `💳 <b>${e.escapeHtml(tariff.label)}</b> — ${tariff.price.toLocaleString("ru-RU")} so'm (${tariff.days} kun)\n\n` +
+    `💳 <b>${e.escapeHtml(tariff.label)}</b> — ${priceWithOld(tariff)} (${tariff.days} kun)\n\n` +
     `To'lov usulini tanlang:`,
     { reply_markup: kb(...rows) }
   ).catch(() => ctx.reply(`To'lov usulini tanlang:`, { reply_markup: kb(...rows) }));
 });
+
+/** "eski narx (chizilgan) yangi narx -N%" ko'rinishidagi matn */
+function priceWithOld(t: { price: number; oldPrice: number | null }): string {
+  const now = `<b>${t.price.toLocaleString("ru-RU")} so'm</b>`;
+  if (t.oldPrice == null || t.oldPrice <= t.price) return now;
+  const off = Math.round((1 - t.price / t.oldPrice) * 100);
+  return `<s>${t.oldPrice.toLocaleString("ru-RU")}</s> ${now} 🎁 <b>-${off}%</b>`;
+}
 
 const METHOD_LABEL: Record<"karta" | "ton", string> = {
   karta: "💳 Karta orqali",
@@ -148,7 +167,7 @@ premiumHandler.callbackQuery(/^pm:(karta|ton):(\d+)$/, async (ctx) => {
   const text =
     `${METHOD_LABEL[method]}\n\n` +
     `Tarif: <b>${e.escapeHtml(tariff.label)}</b>\n` +
-    `Narx: <b>${tariff.price.toLocaleString("ru-RU")} so'm</b>\n` +
+    `Narx: ${priceWithOld(tariff)}\n` +
     `Muddat: <b>${tariff.days} kun</b>\n\n` +
     (payInfo
       ? `${e.escapeHtml(payInfo)}\n\n`

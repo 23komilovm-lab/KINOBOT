@@ -37,18 +37,25 @@ export function activeTariffs() {
 
 /**
  * Standart 3 ta tarifni qo'shadi (agar hech qanday tarif bo'lmasa).
- * Narxlar: kunlik xarajat uzoq muddatda arzonlashadi (1 yil eng foydali).
- * 1 oy: 833 so'm/kun · 3 oy: 667 so'm/kun (~20% arzon) · 1 yil: 493 so'm/kun (~41% arzon)
+ * Aksiya narxlari — eski narxdan 80% chegirma (oldPrice ustidan chizilgan holda ko'rsatiladi).
+ * Kunlik xarajat uzoq muddatda yana arzonlashadi (1 yil eng foydali):
+ * 1 oy: 167 so'm/kun · 3 oy: 133 so'm/kun (~20% arzon) · 1 yil: 99 so'm/kun (~41% arzon)
  */
+export const DEFAULT_TARIFFS = [
+  { label: "1 oy",  days: 30,  price: 5000,  oldPrice: 25000,  sortOrder: 0 },
+  { label: "3 oy",  days: 90,  price: 12000, oldPrice: 60000,  sortOrder: 1 },
+  { label: "1 yil", days: 365, price: 36000, oldPrice: 180000, sortOrder: 2 },
+];
+
 export async function seedDefaultTariffs(): Promise<boolean> {
   const count = await prisma.tariff.count();
   if (count > 0) return false;
-  await prisma.tariff.createMany({
-    data: [
-      { label: "1 oy",  days: 30,  price: 25000,  sortOrder: 0 },
-      { label: "3 oy",  days: 90,  price: 60000,  sortOrder: 1 },
-      { label: "1 yil", days: 365, price: 180000, sortOrder: 2 },
-    ],
-  });
+  await prisma.tariff.createMany({ data: DEFAULT_TARIFFS });
   return true;
+}
+
+/** Standart tariflarni majburan qayta yozadi (narx aksiyasini yangilash uchun) */
+export async function resetToDefaultTariffs(): Promise<void> {
+  await prisma.tariff.deleteMany({});
+  await prisma.tariff.createMany({ data: DEFAULT_TARIFFS });
 }
