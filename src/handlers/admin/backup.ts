@@ -197,6 +197,8 @@ async function performRestore(data: any) {
         quality: m.quality ?? null, language: m.language ?? null,
         buttonText: m.buttonText ?? null, buttonUrl: m.buttonUrl ?? null,
         buttonStyle: m.buttonStyle ?? "primary", views: m.views ?? 0,
+        duration: m.duration ?? null, shortFileId: m.shortFileId ?? null,
+        shortMsgId: m.shortMsgId ?? null, isPremium: m.isPremium ?? false,
       },
       update: {
         title: m.title, caption: m.caption ?? null, fileId: m.fileId,
@@ -204,9 +206,28 @@ async function performRestore(data: any) {
         genre: m.genre ?? null, quality: m.quality ?? null,
         language: m.language ?? null, buttonText: m.buttonText ?? null,
         buttonUrl: m.buttonUrl ?? null, buttonStyle: m.buttonStyle ?? "primary",
+        duration: m.duration ?? null, shortFileId: m.shortFileId ?? null,
+        shortMsgId: m.shortMsgId ?? null, isPremium: m.isPremium ?? false,
       },
     }).catch(() => null);
     movies++;
+  }
+
+  // Tariflar (premium narxlari) — backup v3'dan
+  for (const t of data.tariffs ?? []) {
+    await prisma.tariff.upsert({
+      where:  { id: t.id },
+      create: {
+        id: t.id, label: t.label, days: t.days, price: t.price,
+        oldPrice: t.oldPrice ?? null, starsPrice: t.starsPrice ?? null,
+        sortOrder: t.sortOrder ?? 0, isActive: t.isActive ?? true,
+      },
+      update: {
+        label: t.label, days: t.days, price: t.price,
+        oldPrice: t.oldPrice ?? null, starsPrice: t.starsPrice ?? null,
+        sortOrder: t.sortOrder ?? 0, isActive: t.isActive ?? true,
+      },
+    }).catch(() => null);
   }
 
   // Serials (ID mapping kerak)
@@ -285,21 +306,33 @@ async function performRestore(data: any) {
     }).catch(() => null);
   }
 
-  // Users
-  for (const u of data.users ?? []) {
-    await prisma.user.upsert({
-      where:  { id: BigInt(u.id) },
-      create: {
-        id: BigInt(u.id), firstName: u.firstName ?? null,
-        username: u.username ?? null, isBlocked: u.isBlocked ?? false,
-        isAdmin: u.isAdmin ?? false,
-      },
-      update: {
-        firstName: u.firstName ?? null, username: u.username ?? null,
-        isAdmin: u.isAdmin ?? false,
-      },
-    }).catch(() => null);
-    users++;
+  // Users — createMany bilan bo'lak-bo'lak (10k+ foydalanuvchi uchun upsert juda sekin)
+  const userRows = (data.users ?? []).map((u: Record<string, unknown>) => ({
+    id: BigInt(u.id as string | number),
+    firstName: (u.firstName as string) ?? null,
+    username: (u.username as string) ?? null,
+    region: (u.region as string) ?? null,
+    gender: (u.gender as string) ?? null,
+    referredById: u.referredById != null ? BigInt(u.referredById as string | number) : null,
+    referralConfirmed: (u.referralConfirmed as boolean) ?? false,
+    isBlocked: (u.isBlocked as boolean) ?? false,
+    isAdmin: (u.isAdmin as boolean) ?? false,
+    permissions: (u.permissions as string) ?? null,
+    channelLimit: (u.channelLimit as number) ?? null,
+    premiumUntil: u.premiumUntil ? new Date(u.premiumUntil as string) : null,
+    requestCount: (u.requestCount as number) ?? 0,
+    firstRequestAt: u.firstRequestAt ? new Date(u.firstRequestAt as string) : null,
+    aiRequestCount: (u.aiRequestCount as number) ?? 0,
+    aiRequestDay: (u.aiRequestDay as string) ?? null,
+    ...(u.createdAt ? { createdAt: new Date(u.createdAt as string) } : {}),
+  }));
+
+  const CHUNK = 2000;
+  for (let i = 0; i < userRows.length; i += CHUNK) {
+    const res = await prisma.user
+      .createMany({ data: userRows.slice(i, i + CHUNK), skipDuplicates: true })
+      .catch(() => ({ count: 0 }));
+    users += res.count;
   }
 
   return { movies, serials, episodes, channels, users };
