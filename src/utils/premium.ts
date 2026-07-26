@@ -26,7 +26,11 @@ export async function grantPremium(userId: bigint, days: number): Promise<Date> 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   const base = isPremiumActive(user?.premiumUntil) ? user!.premiumUntil!.getTime() : Date.now();
   const until = new Date(base + days * DAY_MS);
-  await prisma.user.update({ where: { id: userId }, data: { premiumUntil: until } }).catch(() => null);
+  // premiumWarnStage 0 ga qaytadi — uzaytirilgan obuna uchun ogohlantirishlar qaytadan boshlanadi
+  await prisma.user.update({
+    where: { id: userId },
+    data: { premiumUntil: until, premiumWarnStage: 0 },
+  }).catch(() => null);
   return until;
 }
 

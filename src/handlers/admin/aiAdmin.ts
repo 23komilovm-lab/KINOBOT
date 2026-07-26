@@ -6,9 +6,13 @@ import { ibtn, kb, aiActiveKeyboard, adminMenuKeyboard } from "../../utils/keybo
 import { aiEnabled, askAIChat, type ChatMsg } from "../../services/ai.js";
 import { AI_CONTROLLABLE, findControllable, applyControllable, getSetting } from "../../utils/settings.js";
 import { summarizeGender } from "../../utils/gender.js";
+import { acquireBulkLock, bulkSend, formatBulkResult, releaseBulkLock } from "../../services/bulkSend.js";
 import type { MyContext } from "../../types.js";
 
 export const aiAdminHandler = new Composer<MyContext>();
+
+/** broadcast.ts bilan bir xil qulf — bir vaqtda bitta ommaviy yuborish */
+const BULK_KEY = "broadcast";
 
 const AI_BTN  = "AI yordamchi";
 const AI_EXIT = "❌ Chiqish";
@@ -339,32 +343,59 @@ aiAdminHandler.callbackQuery("aiadm:send", async (ctx) => {
   if (!draft) { await ctx.reply("❌ Qoralama topilmadi."); return; }
   if (ctx.session.scratch) delete ctx.session.scratch.aiAdminDraft;
 
+  if (!acquireBulkLock(BULK_KEY)) {
+    await ctx.reply("⏳ Hozir boshqa ommaviy yuborish davom etmoqda. Tugashini kuting.");
+    return;
+  }
+
+  // AI qoralamasi HTML sifatida yuboriladi — buzuq teg bo'lsa HAR BIR yuborish
+  // xato beradi. Avval o'zimizga sinov yuboramiz: xato bo'lsa hech kimga ketmaydi.
+  const chatId = ctx.chat!.id;
+  try {
+    await ctx.api.sendMessage(chatId, draft, { parse_mode: "HTML" });
+  } catch {
+    releaseBulkLock(BULK_KEY);
+    await ctx.reply(
+      "❌ Xabar matnida xato bor (HTML teglari noto'g'ri) — hech kimga yuborilmadi.\n" +
+      "Qoralamani qayta yozdiring."
+    );
+    return;
+  }
+
   const users = await prisma.user.findMany({ where: { isBlocked: false }, select: { id: true } });
   const statusMsg = await ctx.reply(`⏳ Yuborilmoqda: 0 / ${users.length}...`);
 
-  let sent = 0, failed = 0;
-  for (let i = 0; i < users.length; i++) {
+  void (async () => {
     try {
-      await ctx.api.sendMessage(Number(users[i].id), draft, { parse_mode: "HTML" });
-      sent++;
-    } catch {
-      failed++;
-      await prisma.user.update({ where: { id: users[i].id }, data: { isBlocked: true } }).catch(() => null);
-    }
-    if ((i + 1) % 50 === 0 || i === users.length - 1) {
-      await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `⏳ ${i + 1} / ${users.length}...`).catch(() => {});
-    }
-    if (i % 25 === 0 && i > 0) await new Promise((r) => setTimeout(r, 1000));
-  }
+      const result = await bulkSend({
+        userIds: users.map((u) => u.id),
+        send: (uid) => ctx.api.sendMessage(uid, draft, { parse_mode: "HTML" }),
+        onProgress: async (r) => {
+          if (r.processed < r.total) {
+            await ctx.api.editMessageText(chatId, statusMsg.message_id, `⏳ ${r.processed} / ${r.total}...`).catch(() => {});
+          }
+        },
+      });
 
-  await prisma.broadcast.create({
-    data: { targetType: "all", targetExtra: "ai", sentCount: sent, failCount: failed },
-  }).catch(() => null);
+      await prisma.broadcast.create({
+        data: {
+          targetType: "all",
+          targetExtra: "ai",
+          sentCount: result.sent,
+          failCount: result.blocked + result.failed,
+        },
+      }).catch(() => null);
 
-  await ctx.api.editMessageText(
-    ctx.chat!.id, statusMsg.message_id,
-    `✅ <b>Xabar yuborildi!</b>\n\nYuborildi: <b>${sent}</b>\nYuborilmadi: <b>${failed}</b>`
-  ).catch(() => {});
+      await ctx.api.editMessageText(
+        chatId, statusMsg.message_id,
+        `✅ <b>Xabar yuborildi!</b>\n\n${formatBulkResult(result)}`
+      ).catch(() => {});
+    } catch (err) {
+      console.error("🛑 AI broadcast xatosi:", err);
+    } finally {
+      releaseBulkLock(BULK_KEY);
+    }
+  })();
 });
 
 aiAdminHandler.callbackQuery("aiadm:feedback", async (ctx) => {

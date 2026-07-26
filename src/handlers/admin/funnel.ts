@@ -5,7 +5,12 @@ import { ce, e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, ibtn, BE, kb, adminMenuKeyboard } from "../../utils/keyboard.js";
 import { getBool, setBool, KEYS } from "../../utils/settings.js";
 import { UZ_REGIONS } from "../../utils/regions.js";
+import { formatYmd, parseYmd, rangeFromStrings } from "../../utils/dateRange.js";
+import { acquireBulkLock, bulkSend, formatBulkResult, releaseBulkLock } from "../../services/bulkSend.js";
 import type { MyContext } from "../../types.js";
+
+/** broadcast.ts bilan bir xil qulf — bir vaqtda bitta ommaviy yuborish */
+const BULK_KEY = "broadcast";
 import type { Survey, SurveyOption } from "@prisma/client";
 
 export const funnelHandler = new Composer<MyContext>();
@@ -77,13 +82,6 @@ interface FData {
 function getF(ctx: MyContext): FData | null { return (ctx.session.scratch?.funnel as FData) ?? null; }
 function setF(ctx: MyContext, d: FData) { ctx.session.scratch = { ...(ctx.session.scratch ?? {}), funnel: d }; }
 function clearF(ctx: MyContext) { if (ctx.session.scratch) delete ctx.session.scratch.funnel; }
-
-function parseDate(s: string): Date | null {
-  const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-  if (!m) return null;
-  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
-  return isNaN(d.getTime()) ? null : d;
-}
 
 // ─── Asosiy menyu ────────────────────────────────────────────────────────────
 
@@ -389,29 +387,44 @@ async function sendSurveyToUsers(ctx: MyContext, surveyId: number, targetType: s
   const users = await prisma.user.findMany({ ...whereClause, select: { id: true } });
   const total = users.length;
 
-  let sent = 0;
-  const statusMsg = await ctx.reply(`Yuborilmoqda: 0 / ${total}...`);
-
-  for (let i = 0; i < users.length; i++) {
-    try {
-      await pushSurveyToUser(ctx, users[i].id, survey);
-      sent++;
-    } catch {
-      await prisma.user.update({ where: { id: users[i].id }, data: { isBlocked: true } }).catch(() => null);
-    }
-    if ((i + 1) % 50 === 0 || i === users.length - 1) {
-      await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `⏳ ${i + 1} / ${total}...`).catch(() => {});
-    }
-    if (i % 25 === 0 && i > 0) await new Promise((r) => setTimeout(r, 1000));
+  if (!acquireBulkLock(BULK_KEY)) {
+    await ctx.reply("⏳ Hozir boshqa ommaviy yuborish davom etmoqda. Tugashini kuting.");
+    return;
   }
 
-  await prisma.survey.update({ where: { id: surveyId }, data: { sentCount: { increment: sent } } });
-
+  const chatId = ctx.chat!.id;
+  const statusMsg = await ctx.reply(`Yuborilmoqda: 0 / ${total}...`);
   clearF(ctx);
-  await ctx.api.editMessageText(
-    ctx.chat!.id, statusMsg.message_id,
-    `<b>Yuborildi!</b>\n\nYuborildi: <b>${sent}</b>\nYuborilmadi: <b>${total - sent}</b>`
-  ).catch(() => {});
+
+  // Fon rejimida — webhook so'rovi daqiqalab ochiq qolmasin
+  void (async () => {
+    try {
+      const result = await bulkSend({
+        userIds: users.map((u) => u.id),
+        send: (uid) => pushSurveyToUser(ctx, uid, survey),
+        onProgress: async (r) => {
+          if (r.processed < r.total) {
+            await ctx.api.editMessageText(chatId, statusMsg.message_id, `⏳ ${r.processed} / ${r.total}...`).catch(() => {});
+          }
+        },
+      });
+
+      if (result.sent > 0) {
+        await prisma.survey
+          .update({ where: { id: surveyId }, data: { sentCount: { increment: result.sent } } })
+          .catch(() => null);
+      }
+
+      await ctx.api.editMessageText(
+        chatId, statusMsg.message_id,
+        `<b>So'rovnoma yuborildi!</b>\n\n${formatBulkResult(result)}`
+      ).catch(() => {});
+    } catch (err) {
+      console.error("🛑 So'rovnoma yuborish xatosi:", err);
+    } finally {
+      releaseBulkLock(BULK_KEY);
+    }
+  })();
 }
 
 // ─── O'chirish ───────────────────────────────────────────────────────────────
@@ -486,9 +499,9 @@ funnelHandler.on("message:text", async (ctx, next) => {
   }
 
   if (f.state === "sendDateFrom") {
-    const d = parseDate(text);
-    if (!d) { await ctx.reply("❌ Format: <code>DD.MM.YYYY</code>"); return; }
-    f.sendDateFrom = text;
+    const p = parseYmd(text);
+    if (!p) { await ctx.reply("❌ Format: <code>DD.MM.YYYY</code> (mavjud sana bo'lsin)"); return; }
+    f.sendDateFrom = formatYmd(p);
     f.state = "sendDateTo";
     setF(ctx, f);
     await ctx.reply("Tugash sanasini kiriting (DD.MM.YYYY):");
@@ -496,13 +509,17 @@ funnelHandler.on("message:text", async (ctx, next) => {
   }
 
   if (f.state === "sendDateTo") {
-    const d = parseDate(text);
-    if (!d) { await ctx.reply("❌ Format: <code>DD.MM.YYYY</code>"); return; }
-    const from = parseDate(f.sendDateFrom!)!;
-    const to = new Date(d); to.setHours(23, 59, 59, 999);
+    const p = parseYmd(text);
+    if (!p) { await ctx.reply("❌ Format: <code>DD.MM.YYYY</code> (mavjud sana bo'lsin)"); return; }
+    // Sana oralig'i Toshkent vaqti (UTC+5) bo'yicha hisoblanadi
+    const range = rangeFromStrings(f.sendDateFrom!, formatYmd(p));
+    if (!range) {
+      await ctx.reply("❌ Tugash sanasi boshlanish sanasidan oldin bo'lishi mumkin emas.");
+      return;
+    }
     if (!f.surveyId) return;
     await ctx.reply("⏳ Yuborilmoqda...");
-    await sendSurveyToUsers(ctx, f.surveyId, "daterange", from, to);
+    await sendSurveyToUsers(ctx, f.surveyId, "daterange", range.gte, range.lte);
     return;
   }
 

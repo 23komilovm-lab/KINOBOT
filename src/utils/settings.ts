@@ -55,6 +55,7 @@ export const KEYS = {
   freeAiLimit:       "free_ai_limit",       // bepul kunlik AI so'rovlari (0 = cheksiz)
   paymentInfo:       "payment_info",        // Karta orqali to'lov ko'rsatmasi (karta raqami va h.k.)
   paymentInfoTon:    "payment_info_ton",    // TON orqali to'lov ko'rsatmasi (wallet manzili va h.k.)
+  premiumWarnEnabled: "premium_warn_enabled", // premium tugashi haqida ogohlantirish (default: yoqilgan)
   postDeliveryEnabled: "post_delivery_enabled",  // kino yuborilgach qo'shimcha post yoq/o'chir
   postDeliveryText:    "post_delivery_text",     // qo'shimcha post matni (masalan APK reklama)
   postDeliveryBtnText: "post_delivery_btn_text", // qo'shimcha post knopkasi matni

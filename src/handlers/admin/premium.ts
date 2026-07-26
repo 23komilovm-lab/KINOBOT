@@ -2,14 +2,14 @@ import { Composer } from "grammy";
 import { prisma } from "../../prisma.js";
 import { adminCan } from "../../config.js";
 import { e } from "../../utils/emoji.js";
-import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, kb, BE } from "../../utils/keyboard.js";
+import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, contactAdminKb, ibtn, kb, BE } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { grantPremium, seedDefaultTariffs, resetToDefaultTariffs } from "../../utils/premium.js";
 import type { MyContext } from "../../types.js";
 
 export const premiumAdminHandler = new Composer<MyContext>();
 
-const CONTACT_MARKUP = kb([{ text: "📞 Muammo bormi? Admin bilan bog'lanish", url: "https://t.me/akajon_00" }]);
+const CONTACT_MARKUP = contactAdminKb();
 
 function can(ctx: MyContext): boolean {
   return adminCan(ctx.from?.id ?? 0, "premium");
@@ -239,7 +239,8 @@ premiumAdminHandler.callbackQuery(/^prm:approve:(\d+)$/, async (ctx) => {
     Number(p.userId),
     `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium yoqildi!</b>\n\n` +
     `To'lovingiz tasdiqlandi. Premium <b>${until.toLocaleDateString("ru-RU")}</b> gacha amal qiladi.\n` +
-    `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉`,
+    `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉\n\n` +
+    `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
     { parse_mode: "HTML", reply_markup: CONTACT_MARKUP }
   ).catch(() => null);
 });
@@ -361,13 +362,14 @@ premiumAdminHandler.callbackQuery(/^prm:tstars:(\d+)$/, async (ctx) => {
 
 // ─── Sozlamalar ──────────────────────────────────────────────────────────────
 async function settingsData() {
-  const [enabled, freeReq, freeDays, freeAi, payInfo, payInfoTon] = await Promise.all([
+  const [enabled, freeReq, freeDays, freeAi, payInfo, payInfoTon, warn] = await Promise.all([
     getBool(KEYS.premiumEnabled, false),
     getSetting(KEYS.freeRequestLimit, "0"),
     getSetting(KEYS.freeDays, "0"),
     getSetting(KEYS.freeAiLimit, "0"),
     getSetting(KEYS.paymentInfo, ""),
     getSetting(KEYS.paymentInfoTon, ""),
+    getBool(KEYS.premiumWarnEnabled, true),
   ]);
   const text =
     `⚙️ <b>Premium sozlamalari</b>\n\n` +
@@ -377,14 +379,18 @@ async function settingsData() {
     `Bepul AI so'rovlari/kun: <b>${freeAi}</b> (0 = cheksiz)\n` +
     `Karta ma'lumoti: ${payInfo ? "✅ sozlangan" : "❌ yo'q"}\n` +
     `TON ma'lumoti: ${payInfoTon ? "✅ sozlangan" : "❌ yo'q"}\n` +
-    `Stars narxi: Tariflar bo'limida, har tarif uchun alohida\n\n` +
+    `Stars narxi: Tariflar bo'limida, har tarif uchun alohida\n` +
+    `Tugash ogohlantirishi: <b>${warn ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>\n\n` +
     `<i>Bepul chegara: qaysi biri (kino soni yoki kun) birinchi tugasa premium so'raladi. ` +
-    `AI so'rovlari alohida kunlik hisoblanadi.</i>`;
+    `AI so'rovlari alohida kunlik hisoblanadi.\n` +
+    `Ogohlantirish: premium tugashiga 3 kun va 1 kun qolganda hamda tugagan kuni ` +
+    `obunachiga uzaytirish taklifi yuboriladi.</i>`;
   const markup = kb(
     [ibtn(enabled ? "🔴 Tizimni o'chirish" : "🟢 Tizimni yoqish", "prm:toggle", enabled ? "danger" : "success")],
     [ibtn("✏️ Bepul kino soni", "prm:setfreq", "primary"), ibtn("✏️ Bepul kunlar", "prm:setfdays", "primary")],
     [ibtn("🤖 Bepul AI so'rovlari/kun", "prm:setai", "primary")],
     [ibtn("💳 Karta ma'lumoti", "prm:setpay", "primary"), ibtn("💎 TON ma'lumoti", "prm:setpayton", "primary")],
+    [ibtn(warn ? "🔔 Tugash ogohlantirishi: yoqilgan" : "🔕 Tugash ogohlantirishi: o'chirilgan", "prm:togglewarn", warn ? "success" : "danger")],
     [ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)],
   );
   return { text, markup };
@@ -402,6 +408,19 @@ premiumAdminHandler.callbackQuery("prm:toggle", async (ctx) => {
   // Yoqilganda tarif bo'lmasa — standart 3 tarifni avtomatik qo'shamiz
   if (!cur) await seedDefaultTariffs();
   await ctx.answerCallbackQuery({ text: !cur ? "🟢 Premium tizimi yoqildi (tariflar tayyor)" : "🔴 O'chirildi", show_alert: true });
+  const { text, markup } = await settingsData();
+  await ctx.editMessageText(text, { reply_markup: markup }).catch(() => {});
+});
+
+premiumAdminHandler.callbackQuery("prm:togglewarn", async (ctx) => {
+  const cur = await getBool(KEYS.premiumWarnEnabled, true);
+  await setBool(KEYS.premiumWarnEnabled, !cur);
+  await ctx.answerCallbackQuery({
+    text: !cur
+      ? "🔔 Ogohlantirish yoqildi (3 kun / 1 kun / tugagan kuni)"
+      : "🔕 Ogohlantirish o'chirildi",
+    show_alert: true,
+  });
   const { text, markup } = await settingsData();
   await ctx.editMessageText(text, { reply_markup: markup }).catch(() => {});
 });
@@ -597,8 +616,10 @@ premiumAdminHandler.on("message:text", async (ctx, next) => {
     await ctx.reply(`✅ Premium berildi: <code>${uid}</code> — ${until.toLocaleDateString("ru-RU")} gacha`);
     await ctx.api.sendMessage(
       uid,
-      `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Sizga Premium berildi!</b>\n\n${until.toLocaleDateString("ru-RU")} gacha amal qiladi. 🎉`,
-      { parse_mode: "HTML" }
+      `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Sizga Premium berildi!</b>\n\n` +
+      `${until.toLocaleDateString("ru-RU")} gacha amal qiladi. 🎉\n\n` +
+      `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
+      { parse_mode: "HTML", reply_markup: CONTACT_MARKUP }
     ).catch(() => null);
     return;
   }

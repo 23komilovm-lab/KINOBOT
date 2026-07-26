@@ -16,6 +16,7 @@ import { referralHandler } from "./handlers/referral.js";
 import { aiUserHandler } from "./handlers/aiUser.js";
 import { premiumHandler } from "./handlers/premiumUser.js";
 import { startAutoBackup } from "./services/autoBackup.js";
+import { startPremiumExpiryWatcher } from "./services/premiumExpiry.js";
 import { initAiUsageTracking } from "./services/aiUsage.js";
 import { indexVideoMovie } from "./services/ingest.js";
 import { continueSurveyChain } from "./handlers/admin/funnel.js";
@@ -154,6 +155,9 @@ async function main() {
 
   // Avtomatik backup rejalashtiruvchi
   startAutoBackup(bot);
+
+  // Premium tugashi haqida ogohlantirish (3 kun / 1 kun / tugadi)
+  startPremiumExpiryWatcher(bot);
 
   // AI sarf-hisobini DB'ga ulash
   initAiUsageTracking();

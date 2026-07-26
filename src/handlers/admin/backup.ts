@@ -320,6 +320,7 @@ async function performRestore(data: any) {
     permissions: (u.permissions as string) ?? null,
     channelLimit: (u.channelLimit as number) ?? null,
     premiumUntil: u.premiumUntil ? new Date(u.premiumUntil as string) : null,
+    premiumWarnStage: (u.premiumWarnStage as number) ?? 0,
     requestCount: (u.requestCount as number) ?? 0,
     firstRequestAt: u.firstRequestAt ? new Date(u.firstRequestAt as string) : null,
     aiRequestCount: (u.aiRequestCount as number) ?? 0,

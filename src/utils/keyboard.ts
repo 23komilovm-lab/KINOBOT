@@ -74,6 +74,19 @@ export function kb(...rows: any[][]): any {
   return { inline_keyboard: rows };
 }
 
+// ===================== ADMIN BILAN BOG'LANISH =====================
+export const ADMIN_CONTACT_URL = "https://t.me/akajon_00";
+
+/** Foydalanuvchiga yuboriladigan premium xabarlari ostidagi bog'lanish tugmasi */
+export function contactAdminBtn() {
+  return { text: "📞 Admin bilan bog'lanish", url: ADMIN_CONTACT_URL };
+}
+
+/** Faqat "Admin bilan bog'lanish" tugmasidan iborat klaviatura */
+export function contactAdminKb() {
+  return kb([contactAdminBtn()]);
+}
+
 export function rbtn(text: string, style?: BtnStyle, emojiId?: string) {
   return {
     text,

@@ -2,7 +2,7 @@ import { Composer } from "grammy";
 import { prisma } from "../prisma.js";
 import { config } from "../config.js";
 import { e } from "../utils/emoji.js";
-import { ibtn, kb, BE } from "../utils/keyboard.js";
+import { contactAdminBtn, contactAdminKb, ibtn, kb, BE } from "../utils/keyboard.js";
 import { getSetting, KEYS } from "../utils/settings.js";
 import { activeTariffs, grantPremium, isPremiumActive, premiumEnabled, seedDefaultTariffs } from "../utils/premium.js";
 import { getUnsubscribedChannels, editSubscriptionPrompt } from "../utils/subscription.js";
@@ -85,9 +85,13 @@ premiumHandler.command("premium", async (ctx) => {
   const user = await prisma.user.findUnique({ where: { id: BigInt(ctx.from!.id) } });
   if (isPremiumActive(user?.premiumUntil)) {
     const until = user!.premiumUntil!;
+    const daysLeft = Math.max(1, Math.ceil((until.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
     await ctx.reply(
       `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Sizda Premium faol!</b>\n\n` +
-      `Amal qilish muddati: <b>${until.toLocaleDateString("ru-RU")}</b> gacha.`
+      `Amal qilish muddati: <b>${until.toLocaleDateString("ru-RU")}</b> gacha — <b>${daysLeft} kun</b> qoldi.\n\n` +
+      `<i>Muddat tugagach majburiy obuna va limitlar qaytadan ishlaydi. ` +
+      `Tugashiga 3 kun qolganda eslatma yuboramiz.</i>`,
+      { reply_markup: kb([ibtn("💎 Obunani uzaytirish", "prem:show", "success")], [contactAdminBtn()]) }
     );
     return;
   }
@@ -241,7 +245,9 @@ premiumHandler.on("message:successful_payment", async (ctx) => {
   await ctx.reply(
     `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium yoqildi!</b>\n\n` +
     `To'lov Stars orqali muvaffaqiyatli qabul qilindi. Premium <b>${until.toLocaleDateString("ru-RU")}</b> gacha amal qiladi.\n` +
-    `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉`
+    `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉\n\n` +
+    `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
+    { reply_markup: contactAdminKb() }
   );
 });
 

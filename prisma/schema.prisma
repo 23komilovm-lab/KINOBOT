@@ -25,6 +25,7 @@ model User {
   permissions       String?  // ruxsat etilgan bo'limlar (vergul bilan); null = hammasi
   channelLimit      Int?     // majburiy obunaga qo'sha oladigan max kanal; null = cheksiz
   premiumUntil      DateTime? // premium tugash vaqti (null/o'tgan = premium emas)
+  premiumWarnStage  Int      @default(0)  // 0=yo'q · 1=3 kun qoldi · 2=1 kun qoldi · 3=tugadi (premium berilganda 0 ga qaytadi)
   requestCount      Int      @default(0)  // bepul kino so'rovlari hisobi
   firstRequestAt    DateTime? // birinchi so'rov vaqti (vaqt cheklovi uchun)
   aiRequestCount    Int      @default(0)  // bugungi AI so'rovlari hisobi
@@ -115,13 +116,23 @@ model SurveyResponse {
 
 // ===================== BROADCAST TARIXI =====================
 model Broadcast {
-  id          Int      @id @default(autoincrement())
-  targetType  String   @default("all")
-  targetExtra String?
-  sentCount   Int      @default(0)
-  failCount   Int      @default(0)
+  id           Int      @id @default(autoincrement())
+  targetType   String   @default("all")
+  targetExtra  String?
+  sentCount    Int      @default(0)
+  failCount    Int      @default(0)  // vaqtinchalik xato (qayta yuborsa bo'ladi)
+  blockedCount Int      @default(0)  // bloklagan/o'chirgan — qayta yuborish foydasiz
+  abortReason  String?               // to'xtatilgan bo'lsa sababi
+
+  // Qayta yuborish uchun shablon va xato bo'lganlar ro'yxati
+  templateChatId BigInt?
+  templateMsgId  Int?
+  buttonsJson    String?             // inline knopkalar (JSON)
+  failedIds      String?             // vaqtinchalik xato bo'lgan user id'lar (JSON, max 500)
+
   createdAt   DateTime @default(now())
 
+  @@index([createdAt])
   @@map("broadcasts")
 }
 
@@ -277,6 +288,17 @@ model Episode {
 
   @@unique([seasonId, number])
   @@map("episodes")
+}
+
+// ===================== SESSIYA (grammY) =====================
+// Faqat bo'sh bo'lmagan sessiyalar saqlanadi — admin yarim tayyorlagan
+// broadcast/qo'shish oqimi redeploy'dan keyin ham yo'qolmasin.
+model Session {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("sessions")
 }
 
 // ===================== SOZLAMALAR =====================

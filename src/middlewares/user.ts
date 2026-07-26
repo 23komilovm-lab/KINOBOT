@@ -20,6 +20,10 @@ export async function trackUser(ctx: MyContext, next: NextFunction) {
           firstName: from.first_name,
           username: from.username,
           isAdmin: isAdmin(from.id),
+          // Foydalanuvchi botga murojaat qilyapti — demak bloklamagan.
+          // Ommaviy yuborishda tarmoq xatosi tufayli noto'g'ri belgilangan
+          // bo'lsa, shu yerda o'zi tiklanadi.
+          isBlocked: false,
         },
       });
     } catch {
