@@ -9,6 +9,54 @@ import type { MyContext } from "../types.js";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** Chegara tekshiruvi uchun kerak bo'ladigan minimal foydalanuvchi maydonlari */
+interface QuotaUser {
+  premiumUntil: Date | null;
+  requestCount: number;
+  firstRequestAt: Date | null;
+}
+
+/**
+ * Bepul chegara tugaganmi? Hisobni OSHIRMAYDI — faqat o'qiydi.
+ * Inline so'rovlar uchun kerak: ular har bosilgan harfda keladi, shuning uchun
+ * u yerda hisoblash mumkin emas, lekin chegarani hurmat qilish shart.
+ */
+export async function isFreeQuotaExhausted(user: QuotaUser | null): Promise<boolean> {
+  if (isPremiumActive(user?.premiumUntil)) return false;
+  if (!(await premiumEnabled())) return false;
+
+  const { requests: freeReq, days: freeDays } = await getFreeLimits();
+
+  if (freeDays > 0 && user?.firstRequestAt) {
+    if (Date.now() - user.firstRequestAt.getTime() > freeDays * DAY_MS) return true;
+  }
+  if (freeReq > 0 && (user?.requestCount ?? 0) >= freeReq) return true;
+  return false;
+}
+
+/**
+ * Kontent HAQIQATAN yetkazilgandan keyin so'rovni hisoblaydi.
+ *
+ * Ilgari hisob yetkazishdan OLDIN oshirilardi — xato kod yozgan yoki premium
+ * kinoga urilgan foydalanuvchi bepul so'rovini yo'qotib, hech narsa olmasdi.
+ */
+export async function countContentRequest(ctx: MyContext): Promise<void> {
+  const uid = ctx.from?.id;
+  if (!uid || isAdmin(uid)) return;
+  if (!(await premiumEnabled())) return;
+
+  const user = await prisma.user.findUnique({ where: { id: BigInt(uid) } });
+  if (isPremiumActive(user?.premiumUntil)) return;
+
+  await prisma.user.update({
+    where: { id: BigInt(uid) },
+    data: {
+      requestCount: { increment: 1 },
+      ...(user?.firstRequestAt ? {} : { firstRequestAt: new Date() }),
+    },
+  }).catch(() => null);
+}
+
 /**
  * Kontentga ruxsatni tekshiradi.
  * - Admin → har doim ruxsat.

@@ -3,10 +3,11 @@ import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { adminMenuKeyboard, kb } from "../utils/keyboard.js";
 import { getUnsubscribedChannels } from "../utils/subscription.js";
-import { checkContentAccess } from "../utils/access.js";
+import { checkContentAccess, countContentRequest } from "../utils/access.js";
 import { attachReferrer, confirmReferral } from "../utils/referral.js";
 import { sendReferralInfo } from "./referral.js";
 import { sendMovie } from "../services/media.js";
+import { sendPremiumPrompt } from "./premiumUser.js";
 import { sendSerialSeasons } from "./serialView.js";
 import type { MyContext } from "../types.js";
 
@@ -62,6 +63,9 @@ startHandler.command("start", async (ctx) => {
   } else if (payload.startsWith("ref_")) {
     const refId = Number(payload.slice(4));
     if (Number.isInteger(refId)) await attachReferrer(uid, refId);
+  } else if (payload === "premium") {
+    // Inline rejimdagi "Bepul chegara tugadi — Premium olish" tugmasidan
+    if (!isAdmin(uid)) { await sendPremiumPrompt(ctx); return; }
   }
 
   // Admin — qisqa xabar + knopkalar
@@ -73,15 +77,16 @@ startHandler.command("start", async (ctx) => {
   }
 
   // Deep-link kino — premium/majburiy obuna/limit tekshiruvi
+  // (so'rov faqat kino haqiqatan yetkazilgandan keyin hisoblanadi)
   if (pendingCode !== null) {
-    const ok = await checkContentAccess(ctx);
+    const ok = await checkContentAccess(ctx, false);
     if (!ok) {
       ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pendingCode };
       return;
     }
     await confirmReferral(ctx, uid);
     const delivered = await deliverByCode(ctx, pendingCode);
-    if (delivered) return;
+    if (delivered) { await countContentRequest(ctx); return; }
   }
 
   // Oddiy /start — chiroyli welcome (obuna kod yozilganda tekshiriladi)
@@ -104,7 +109,7 @@ startHandler.callbackQuery("sub:check", async (ctx) => {
     if (typeof pending === "number") {
       if (ctx.session.scratch) delete ctx.session.scratch.pendingCode;
       const ok = await deliverByCode(ctx, pending);
-      if (ok) return;
+      if (ok) { await countContentRequest(ctx); return; }
     }
 
     await sendWelcome(ctx);
@@ -123,10 +128,10 @@ startHandler.callbackQuery("start:referal", async (ctx) => {
 
 startHandler.callbackQuery("start:random", async (ctx) => {
   await ctx.answerCallbackQuery();
-  if (!(await checkContentAccess(ctx))) return;
+  if (!(await checkContentAccess(ctx, false))) return;
   const total = await prisma.movie.count();
   if (total === 0) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
   const skip = Math.floor(Math.random() * total);
   const [movie] = await prisma.movie.findMany({ skip, take: 1 });
-  if (movie) await sendMovie(ctx, movie);
+  if (movie && (await sendMovie(ctx, movie))) await countContentRequest(ctx);
 });

@@ -3,6 +3,8 @@ import { isOwner, adminCan } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
+import { setSetting, KEYS } from "../../utils/settings.js";
+import { getReferralReward } from "../../utils/referral.js";
 import type { MyContext } from "../../types.js";
 
 export const referralsHandler = new Composer<MyContext>();
@@ -59,15 +61,40 @@ async function renderTop(ctx: MyContext, page: number, edit: boolean) {
   if (nav.length) rows.push(nav);
   rows.push([ibtn("Menyuga qaytish", "ref:close", undefined, BE.backMenu)]);
 
+  const reward = await getReferralReward();
+  const rewardLine = reward.count > 0 && reward.days > 0
+    ? `🎁 Mukofot: har <b>${reward.count}</b> ta referal = <b>${reward.days} kun</b> premium`
+    : `🎁 Mukofot: <b>o'chirilgan</b>`;
+
+  rows.splice(rows.length - 1, 0, [ibtn("🎁 Mukofotni sozlash", "ref:reward", "success")]);
+
   const text =
     `<tg-emoji emoji-id="${BE.users}">👥</tg-emoji> <b>Referal bo'lim</b>\n\n` +
     `Jami referrerlar: <b>${totalReferrers}</b>\n` +
-    `Jami referallar: <b>${totalReferrals}</b>\n\n` +
+    `Jami referallar: <b>${totalReferrals}</b>\n` +
+    `${rewardLine}\n\n` +
     `Batafsil ko'rish va xabar yuborish uchun tanlang:`;
 
   if (edit) await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
   else await ctx.reply(text, { reply_markup: kb(...rows) });
 }
+
+// ─── Mukofot sozlamasi ───────────────────────────────────────────────────────
+
+referralsHandler.callbackQuery("ref:reward", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const reward = await getReferralReward();
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), refRewardEdit: true };
+  await ctx.reply(
+    `🎁 <b>Referal mukofoti</b>\n\n` +
+    `Hozirgi: ${reward.count > 0 && reward.days > 0
+      ? `har <b>${reward.count}</b> ta referal = <b>${reward.days} kun</b> premium`
+      : `<b>o'chirilgan</b>`}\n\n` +
+    `Yangi qiymatni <code>referal kun</code> ko'rinishida yuboring.\n` +
+    `Masalan: <code>5 7</code> — har 5 ta do'st uchun 7 kun premium.\n\n` +
+    `O'chirish uchun: <code>0 0</code>`
+  );
+});
 
 referralsHandler.callbackQuery("noop:ref", (ctx) => ctx.answerCallbackQuery());
 
@@ -120,6 +147,27 @@ referralsHandler.callbackQuery(/^ref:msg:(\d+)$/, async (ctx) => {
 
 referralsHandler.on("message", async (ctx, next) => {
   if (!adminCan(ctx.from?.id ?? 0, "referrals")) return next();
+
+  // ── Mukofot sozlamasi ──
+  if (ctx.session.scratch?.refRewardEdit) {
+    delete ctx.session.scratch.refRewardEdit;
+    const parts = (ctx.message.text ?? "").trim().split(/\s+/);
+    const count = parseInt(parts[0], 10);
+    const days  = parseInt(parts[1], 10);
+    if (Number.isNaN(count) || Number.isNaN(days) || count < 0 || days < 0) {
+      await ctx.reply("❌ Format: <code>referal kun</code>. Masalan: <code>5 7</code>");
+      return;
+    }
+    await setSetting(KEYS.referralRewardCount, String(count));
+    await setSetting(KEYS.referralRewardDays, String(days));
+    await ctx.reply(
+      count > 0 && days > 0
+        ? `✅ Mukofot: har <b>${count}</b> ta referal = <b>${days} kun</b> premium.`
+        : `✅ Referal mukofoti <b>o'chirildi</b>.`
+    );
+    return;
+  }
+
   const target = ctx.session.scratch?.refMsgTarget as string | undefined;
   if (!target) return next();
 

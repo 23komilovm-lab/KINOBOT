@@ -187,7 +187,7 @@ async function main() {
 
   // Ikkala rejim uchun bir xil — chat_member va channel_post ham keladi
   const ALLOWED_UPDATES = [
-    "message", "callback_query", "inline_query",
+    "message", "callback_query", "inline_query", "chosen_inline_result",
     "chat_join_request", "chat_member", "channel_post",
     "pre_checkout_query",
   ] as const;

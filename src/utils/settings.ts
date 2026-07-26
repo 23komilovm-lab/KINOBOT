@@ -56,6 +56,8 @@ export const KEYS = {
   paymentInfo:       "payment_info",        // Karta orqali to'lov ko'rsatmasi (karta raqami va h.k.)
   paymentInfoTon:    "payment_info_ton",    // TON orqali to'lov ko'rsatmasi (wallet manzili va h.k.)
   premiumWarnEnabled: "premium_warn_enabled", // premium tugashi haqida ogohlantirish (default: yoqilgan)
+  referralRewardCount: "referral_reward_count", // necha referal uchun mukofot (0 = o'chirilgan)
+  referralRewardDays:  "referral_reward_days",  // necha kun premium beriladi
   postDeliveryEnabled: "post_delivery_enabled",  // kino yuborilgach qo'shimcha post yoq/o'chir
   postDeliveryText:    "post_delivery_text",     // qo'shimcha post matni (masalan APK reklama)
   postDeliveryBtnText: "post_delivery_btn_text", // qo'shimcha post knopkasi matni

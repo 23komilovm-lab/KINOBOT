@@ -3,7 +3,7 @@ import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { ce, e } from "../utils/emoji.js";
 import { sendMovie } from "../services/media.js";
-import { checkContentAccess } from "../utils/access.js";
+import { checkContentAccess, countContentRequest } from "../utils/access.js";
 import { confirmReferral } from "../utils/referral.js";
 import { sendSerialSeasons } from "./serialView.js";
 import { deliverByCode } from "./start.js";
@@ -20,9 +20,16 @@ const PANEL_TEXTS = new Set([
   "❌ Bekor qilish",
 ]);
 
-/** Kontent gate: premium/majburiy obuna/bepul limit. false — bloklangan. */
+/**
+ * Kontent gate: premium/majburiy obuna/bepul limit. false — bloklangan.
+ *
+ * MUHIM: bu yerda so'rov HISOBLANMAYDI (`count = false`). Hisob faqat kino
+ * haqiqatan yetkazilgandan keyin `countContentRequest()` bilan oshiriladi —
+ * aks holda xato kod yozgan yoki premium kinoga urilgan foydalanuvchi bepul
+ * so'rovini yo'qotib, hech narsa olmasdi.
+ */
 async function checkAccess(ctx: MyContext): Promise<boolean> {
-  const ok = await checkContentAccess(ctx);
+  const ok = await checkContentAccess(ctx, false);
   if (!ok) return false;
   if (!isAdmin(ctx.from!.id)) await confirmReferral(ctx, ctx.from!.id);
   return true;
@@ -41,7 +48,7 @@ searchHandler.command("random", async (ctx) => {
   if (total === 0) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
   const skip = Math.floor(Math.random() * total);
   const [movie] = await prisma.movie.findMany({ skip, take: 1 });
-  if (movie) await sendMovie(ctx, movie);
+  if (movie && (await sendMovie(ctx, movie))) await countContentRequest(ctx);
 });
 
 // ─── Qidiruv knopkasi: ko'p ko'rilgan / inline ───────────────────────────────
@@ -99,7 +106,7 @@ searchHandler.on("message:text", async (ctx, next) => {
     if (ctx.session.scratch) delete ctx.session.scratch.pendingCode;
 
     const delivered = await deliverByCode(ctx, code);
-    if (delivered) return;
+    if (delivered) { await countContentRequest(ctx); return; }
 
     await ctx.reply(
       `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> <b>${code}</b> kodli kino topilmadi.\n\n` +
@@ -153,17 +160,21 @@ async function searchByName(ctx: MyContext, query: string) {
 }
 
 // Natijadan kino
+// Gate shu yerda ham kerak: qidiruv natijasidagi ro'yxatdan ketma-ket bosib,
+// bitta so'rov hisobiga cheksiz kino olish mumkin edi.
 searchHandler.callbackQuery(/^movie:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   const movie = await prisma.movie.findUnique({ where: { id } });
   await ctx.answerCallbackQuery();
   if (!movie) { await ctx.reply("❌ Kino topilmadi."); return; }
-  await sendMovie(ctx, movie);
+  if (!(await checkAccess(ctx))) return;
+  if (await sendMovie(ctx, movie)) await countContentRequest(ctx);
 });
 
-// Natijadan serial
+// Natijadan serial (sezonlar ro'yxati — video emas, shuning uchun hisoblanmaydi)
 searchHandler.callbackQuery(/^serial:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   await ctx.answerCallbackQuery();
+  if (!(await checkAccess(ctx))) return;
   await sendSerialSeasons(ctx, id);
 });

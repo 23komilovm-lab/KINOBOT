@@ -6,6 +6,7 @@ import { movieCaption } from "../services/media.js";
 import { getGlobalButton, getBool, KEYS } from "../utils/settings.js";
 import { contentButtonRow } from "../utils/contentButton.js";
 import { getUnsubscribedChannels } from "../utils/subscription.js";
+import { countContentRequest, isFreeQuotaExhausted } from "../utils/access.js";
 import { isPremiumActive } from "../utils/premium.js";
 import { e } from "../utils/emoji.js";
 import type { MyContext } from "../types.js";
@@ -47,12 +48,15 @@ inlineHandler.on("inline_query", async (ctx) => {
     return;
   }
 
+  const admin = isAdmin(uid);
+  const user  = admin ? null : await prisma.user.findUnique({ where: { id: BigInt(uid) } });
+  const premium = admin || isPremiumActive(user?.premiumUntil);
+
   // Majburiy obuna — boshqa chatlarda ham tekshiriladi (video "sizib chiqmasin").
   // Admin va premium foydalanuvchilar obunasiz o'tadi.
-  if (!isAdmin(uid)) {
+  if (!premium) {
     const forceSub = await getBool(KEYS.forceSubEnabled, true);
-    const u = forceSub ? await prisma.user.findUnique({ where: { id: BigInt(uid) } }) : null;
-    if (forceSub && !isPremiumActive(u?.premiumUntil)) {
+    if (forceSub) {
       const notJoined = await getUnsubscribedChannels(ctx, uid);
       const blocking  = notJoined.filter((c) => c.type !== "INSTAGRAM");
       if (blocking.length > 0) {
@@ -67,13 +71,30 @@ inlineHandler.on("inline_query", async (ctx) => {
         return;
       }
     }
+
+    // Bepul chegara tugagan bo'lsa inline orqali ham kino berilmaydi.
+    // MUHIM: inline so'rov har bosilgan harfda keladi, shuning uchun bu yerda
+    // hisob OSHIRILMAYDI — faqat mavjud hisob tekshiriladi. Haqiqiy hisoblash
+    // foydalanuvchi natijani tanlaganda (chosen_inline_result) bo'ladi.
+    if (await isFreeQuotaExhausted(user)) {
+      await ctx.answerInlineQuery([], {
+        cache_time: 0,
+        is_personal: true,
+        button: { text: "💎 Bepul chegara tugadi — Premium olish", start_parameter: "premium" },
+      });
+      return;
+    }
   }
 
-  const where = q
+  const search = q
     ? /^\d+$/.test(q)
       ? { code: Number(q) }
       : { title: { contains: q, mode: "insensitive" as const } }
     : {};
+
+  // TESHIK YOPILDI: ilgari bu yerda isPremium filtri yo'q edi va oddiy
+  // foydalanuvchi inline orqali istalgan premium kinoni bepul olardi.
+  const where = premium ? search : { ...search, isPremium: false };
 
   const movies = await prisma.movie.findMany({
     where,
@@ -113,4 +134,18 @@ inlineHandler.on("inline_query", async (ctx) => {
       start_parameter: "search",
     },
   });
+});
+
+/**
+ * Foydalanuvchi inline natijani TANLAGANDA — bepul so'rovni hisoblaymiz.
+ * Inline so'rovning o'zida hisoblab bo'lmaydi (har bosilgan harfda keladi).
+ *
+ * ESLATMA: bu update faqat BotFather'da inline feedback yoqilgan bo'lsa keladi
+ * (@BotFather → /setinlinefeedback → Enabled). Yoqilmagan bo'lsa handler
+ * ishlamaydi — qolgan himoya (premium filtri, chegara tekshiruvi) baribir kuchda.
+ */
+inlineHandler.on("chosen_inline_result", async (ctx) => {
+  const id = ctx.chosenInlineResult.result_id;
+  if (!id.startsWith("m")) return; // faqat kino natijalari (ref taklifi emas)
+  await countContentRequest(ctx);
 });
