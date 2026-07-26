@@ -23,6 +23,18 @@ import { nearestRegion } from "./utils/regions.js";
 import { getBool, KEYS } from "./utils/settings.js";
 import { e } from "./utils/emoji.js";
 
+// ===== Kutilmagan xatolarni ushlab, jarayonni yiqilishdan saqlash =====
+// Ba'zi xatolar (masalan webhook rejimida) grammY'ning bot.catch() zanjirini
+// chetlab o'tib to'g'ridan-to'g'ri unhandledRejection sifatida chiqishi mumkin —
+// bunday holatda process.exit bo'lmasin, faqat loglansin (bot.catch() asosiy
+// himoya, bu esa oxirgi xavfsizlik chizig'i).
+process.on("unhandledRejection", (reason) => {
+  console.error("🛑 Unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("🛑 Uncaught exception:", err);
+});
+
 // ===== Middleware: foydalanuvchini bazaga yozish =====
 bot.use(trackUser);
 
