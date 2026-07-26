@@ -8,9 +8,9 @@ import { movieChannelCaption } from "./movieChannel.js";
 import type { MyContext } from "../types.js";
 import type { Movie } from "@prisma/client";
 
-/** Kino caption — kanal posti bilan bir xil premium emojili format */
+/** Kino caption (bot ichida) — premium emojili format, janr ikonkasi doimiy 🎭 */
 export function movieCaption(m: Movie): string {
-  return movieChannelCaption(m);
+  return movieChannelCaption(m, false);
 }
 
 /**
