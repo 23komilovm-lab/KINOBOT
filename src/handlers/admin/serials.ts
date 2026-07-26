@@ -107,62 +107,97 @@ serialsHandler.callbackQuery("sr:addep", async (ctx) => {
 });
 
 export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyContext) {
+  // ── 1️⃣ Serialni TUGMA orqali tanlash ──
+  const serials = await conversation.external(() =>
+    prisma.serial.findMany({
+      orderBy: { createdAt: "desc" },
+      select: { id: true, code: true, title: true },
+    })
+  );
+
+  if (serials.length === 0) {
+    return ctx.reply("📭 Hozircha serial yo'q. Avval <b>Serial qo'shish</b> orqali serial qo'shing.", {
+      reply_markup: adminMenuKeyboard(ctx.from?.id),
+    });
+  }
+
+  const serialRows = serials.map((s) => [
+    ibtn(`${s.code} · ${s.title}`.slice(0, 60), `ep:s:${s.id}`, "primary", BE.serial),
+  ]);
+  serialRows.push([ibtn("❌ Bekor qilish", "ep:cancel", "danger")]);
+
+  await ctx.reply(`🎞 <b>Qism qo'shish</b>\n\n1️⃣ Qaysi serialga qo'shamiz?`, {
+    reply_markup: kb(...serialRows),
+  });
+
+  const sPick = await conversation.waitForCallbackQuery(/^ep:(s:\d+|cancel)$/);
+  await sPick.answerCallbackQuery();
+  if (sPick.callbackQuery.data === "ep:cancel") return stop(sPick);
+
+  const serialId = Number(sPick.callbackQuery.data.split(":")[2]);
+  const serial = serials.find((s) => s.id === serialId)!;
+  const serialTitle = serial.title;
+
+  // ── 2️⃣ Sezonni TUGMA orqali tanlash (yoki yangi qo'shish) ──
+  const seasons = await conversation.external(() =>
+    prisma.season.findMany({
+      where: { serialId },
+      orderBy: { number: "asc" },
+      select: { number: true, _count: { select: { episodes: true } } },
+    })
+  );
+
+  const seasonRows = seasons.map((s) => [
+    ibtn(`${s.number}-sezon (${s._count.episodes} qism)`, `ep:se:${s.number}`, "primary", BE.folder),
+  ]);
+  const nextSeason = seasons.length ? Math.max(...seasons.map((s) => s.number)) + 1 : 1;
+  seasonRows.push([ibtn(`➕ Yangi sezon (${nextSeason})`, `ep:se:${nextSeason}`, "success", BE.chAdd)]);
+  seasonRows.push([ibtn("❌ Bekor qilish", "ep:cancel", "danger")]);
+
   await ctx.reply(
-    `🎞 <b>Qism qo'shish</b>\n\n1️⃣ Qaysi serial? Serial <b>kodini</b> kiriting.`,
+    `<b>${e.escapeHtml(serialTitle)}</b>\n\n2️⃣ Qaysi sezon?` +
+    (seasons.length === 0 ? `\n\n<i>Hozircha sezon yo'q — yangi sezon qo'shiladi.</i>` : ""),
+    { reply_markup: kb(...seasonRows) }
+  );
+
+  const sePick = await conversation.waitForCallbackQuery(/^ep:(se:\d+|cancel)$/);
+  await sePick.answerCallbackQuery();
+  if (sePick.callbackQuery.data === "ep:cancel") return stop(sePick);
+
+  const seasonNum = Number(sePick.callbackQuery.data.split(":")[2]);
+
+  // ── 3️⃣ Qism raqami — keyingisi avtomatik taklif qilinadi ──
+  const lastEp = await conversation.external(() =>
+    prisma.episode.findFirst({
+      where: { season: { serialId, number: seasonNum } },
+      orderBy: { number: "desc" },
+      select: { number: true },
+    })
+  );
+  const suggested = (lastEp?.number ?? 0) + 1;
+
+  await ctx.reply(
+    `<b>${e.escapeHtml(serialTitle)}</b> — ${seasonNum}-sezon\n\n` +
+    `3️⃣ <b>Qism</b> raqami: keyingisi <b>${suggested}</b>.\n\n` +
+    `Shu bo'lsa <code>+</code> deb yuboring, yoki boshqa raqam yozing.`,
     { reply_markup: cancelKeyboard() }
   );
 
-  let serialId = 0;
-  let serialTitle = "";
-  while (true) {
-    const c = await conversation.wait();
-    if (isCancel(c.message?.text)) return stop(c);
-    const t = c.message?.text?.trim() ?? "";
-    if (!/^\d+$/.test(t)) {
-      await c.reply("❌ Faqat raqam (serial kodi).");
-      continue;
-    }
-    const serial = await conversation.external(() =>
-      prisma.serial.findUnique({ where: { code: Number(t) } })
-    );
-    if (!serial) {
-      await c.reply("❌ Bunday kodli serial yo'q.");
-      continue;
-    }
-    serialId = serial.id;
-    serialTitle = serial.title;
-    break;
-  }
-
-  await ctx.reply("2️⃣ <b>Sezon</b> raqamini kiriting (masalan 1).");
-  let seasonNum = 0;
-  while (true) {
-    const c = await conversation.wait();
-    if (isCancel(c.message?.text)) return stop(c);
-    const t = c.message?.text?.trim() ?? "";
-    if (!/^\d+$/.test(t)) {
-      await c.reply("❌ Faqat raqam.");
-      continue;
-    }
-    seasonNum = Number(t);
-    break;
-  }
-
-  await ctx.reply("3️⃣ <b>Qism</b> raqamini kiriting (masalan 1).");
   let epNum = 0;
   while (true) {
     const c = await conversation.wait();
     if (isCancel(c.message?.text)) return stop(c);
     const t = c.message?.text?.trim() ?? "";
+    if (t === "+") { epNum = suggested; break; }
     if (!/^\d+$/.test(t)) {
-      await c.reply("❌ Faqat raqam.");
+      await c.reply(`❌ Faqat raqam, yoki <code>+</code> (${suggested}-qism uchun).`);
       continue;
     }
     epNum = Number(t);
     break;
   }
 
-  await ctx.reply("4️⃣ Endi qism <b>videosini</b> yuboring.");
+  await ctx.reply(`4️⃣ Endi <b>${seasonNum}-sezon ${epNum}-qism</b> videosini yuboring.`);
   const vidCtx = await conversation.wait();
   if (isCancel(vidCtx.message?.text)) return stop(vidCtx);
   const video = vidCtx.message?.video;
@@ -202,10 +237,16 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   });
 
   await ctx.reply(
-    `${ce("check")} Qism saqlandi: <b>${e.escapeHtml(serialTitle)}</b> — ${seasonNum}-sezon, ${result.number}-qism.\n` +
-      `Yana qism qo'shish uchun "🎞 Qism qo'shish".`,
+    `${ce("check")} Qism saqlandi: <b>${e.escapeHtml(serialTitle)}</b> — ${seasonNum}-sezon, ${result.number}-qism.`,
     { reply_markup: adminMenuKeyboard(ctx.from?.id) }
   );
+  // Ketma-ket qism qo'shish uchun tezkor tugma
+  await ctx.reply("Yana qism qo'shasizmi?", {
+    reply_markup: kb(
+      [ibtn("➕ Yana qism qo'shish", "sr:addep", "success", BE.chAdd)],
+      [ibtn("🎞 Serial bo'limi", "sr:back", "primary", BE.backMenu)],
+    ),
+  });
 }
 
 // ============ RO'YXAT ============

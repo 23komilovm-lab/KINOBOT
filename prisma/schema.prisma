@@ -217,6 +217,7 @@ model Movie {
   duration    Int?     // sekundlarda
   shortFileId String?  // qisqa (treyler) video file_id
   shortMsgId  Int?     // kino kanaldagi qisqa video xabar id
+  isPremium   Boolean  @default(false) // faqat premium obunachilar ko'radi
   buttonText  String?
   buttonUrl   String?
   buttonStyle String   @default("primary")

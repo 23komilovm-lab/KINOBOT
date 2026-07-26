@@ -15,6 +15,24 @@ export const moviesHandler = new Composer<MyContext>();
 const CANCEL = "❌ Bekor qilish";
 const isCancel = (t?: string) => t === CANCEL || t === "/cancel";
 
+/**
+ * AI javobidan faqat janrlarni ajratib oladi.
+ * AI ba'zan "«Titanic» filmi drama, melodrama." kabi to'liq gap qaytaradi —
+ * shuning uchun ortiqcha so'zlar, tirnoq va nuqtalar tozalanadi.
+ */
+function cleanGenre(raw: string | null): string | null {
+  if (!raw) return null;
+  let s = raw.trim().split("\n")[0];            // faqat 1-qator
+  s = s.replace(/^[^:]{0,40}:\s*/, "");          // "Janr:" kabi prefiks
+  s = s.replace(/["'«»`*]/g, "");                // tirnoq/markdown
+  s = s.replace(/\s*\.\s*$/, "");                // oxiridagi nuqta
+  // "filmi/film/kino" kabi so'zlar va ulardan oldingi nom qismini olib tashlash
+  s = s.replace(/^.*?\b(?:filmi|film|kinosi|kino)\b\s*/i, "");
+  s = s.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 3).join(", ");
+  s = s.slice(0, 100).trim();
+  return s || null;
+}
+
 function movieMenu() {
   return kb(
     [ibtn("Kino qo'shish", "mv:add", "success", BE.chAdd)],
@@ -87,26 +105,45 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
     return titleCtx.reply("❌ Bekor qilindi.", { reply_markup: adminMenuKeyboard(ownerId) });
   const title = titleCtx.message?.text?.trim() || "Nomsiz";
 
-  await ctx.reply(
-    "4️⃣ Kino <b>janrini</b> kiriting. Masalan: <code>Jangari, Drama</code>\n\n" +
-    (aiEnabled() ? "🤖 AI aniqlashi uchun <code>ai</code> deb yozing." : "")
-  );
-  const genreCtx = await conversation.wait();
-  if (isCancel(genreCtx.message?.text))
-    return genreCtx.reply("❌ Bekor qilindi.", { reply_markup: adminMenuKeyboard(ownerId) });
-  let genre = genreCtx.message?.text?.trim() || null;
-
-  // AI bilan janrni avtomatik aniqlash
-  if (genre && genre.toLowerCase() === "ai") {
+  // 4️⃣ Janr — AI AVTOMATIK aniqlaydi, admin xohlasa o'zgartiradi
+  let genre: string | null = null;
+  if (aiEnabled()) {
     await ctx.reply("🤖 AI janrni aniqlamoqda...");
     const aiGenre = await conversation.external(() =>
       askAI("admin",
-        `"${title}" nomli kino qaysi janrga mansub? Faqat 1-3 ta janr nomini vergul bilan yoz, boshqa hech narsa yozma. O'zbekcha. Masalan: Jangari, Drama`,
+        `"${title}" nomli kino qaysi janrga mansub? Faqat 1-3 ta janr nomini vergul bilan yoz, ` +
+        `boshqa hech narsa yozma (izoh, tirnoq, nuqta ham yo'q). O'zbekcha. Masalan: Jangari, Drama`,
       )
     );
-    genre = aiGenre?.trim().split("\n")[0]?.slice(0, 100) || null;
-    await ctx.reply(genre ? `🤖 Aniqlangan janr: <b>${e.escapeHtml(genre)}</b>` : "⚠️ AI aniqlay olmadi, janrsiz davom etamiz.");
+    genre = cleanGenre(aiGenre);
   }
+
+  if (genre) {
+    await ctx.reply(
+      `4️⃣ 🤖 AI aniqlagan janr: <b>${e.escapeHtml(genre)}</b>\n\n` +
+      `Shu bo'lsa <code>+</code> deb yuboring (yoki "Tasdiqlash" tugmasi).\n` +
+      `O'zgartirmoqchi bo'lsangiz — yangi janrni yozing.`,
+      { reply_markup: cancelKeyboard() }
+    );
+  } else {
+    await ctx.reply(
+      `4️⃣ Kino <b>janrini</b> kiriting. Masalan: <code>Jangari, Drama</code>\n` +
+      `Janrsiz davom etish uchun <code>-</code> yozing.` +
+      (aiEnabled() ? `\n\n<i>⚠️ AI janrni aniqlay olmadi.</i>` : ""),
+      { reply_markup: cancelKeyboard() }
+    );
+  }
+
+  const genreCtx = await conversation.wait();
+  if (isCancel(genreCtx.message?.text))
+    return genreCtx.reply("❌ Bekor qilindi.", { reply_markup: adminMenuKeyboard(ownerId) });
+  const genreInput = genreCtx.message?.text?.trim() ?? "";
+  if (genreInput === "-") {
+    genre = null;
+  } else if (genreInput && genreInput !== "+") {
+    genre = genreInput.slice(0, 100); // admin qo'lda kiritgan janr ustun
+  }
+  // "+" yoki bo'sh bo'lsa — AI aniqlagan janr o'z holida qoladi
 
   // 5️⃣ Qisqa (treyler) video — o'tkazib yuborish mumkin
   await ctx.reply(

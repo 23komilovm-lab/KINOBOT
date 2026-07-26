@@ -1,6 +1,9 @@
 import { prisma } from "../prisma.js";
+import { isAdmin } from "../config.js";
 import { contentButtonRow, contentButtonMarkup } from "../utils/contentButton.js";
 import { getGlobalButton, getBool, getSetting, KEYS } from "../utils/settings.js";
+import { isPremiumActive } from "../utils/premium.js";
+import { sendPremiumPrompt } from "../handlers/premiumUser.js";
 import { movieChannelCaption } from "./movieChannel.js";
 import type { MyContext } from "../types.js";
 import type { Movie } from "@prisma/client";
@@ -10,7 +13,30 @@ export function movieCaption(m: Movie): string {
   return movieChannelCaption(m);
 }
 
-export async function sendMovie(ctx: MyContext, movie: Movie) {
+/**
+ * Premium kino uchun ruxsatni tekshiradi.
+ * Admin va premium obunachilar o'tadi; boshqalarga premium taklifi ko'rsatiladi.
+ * false qaytsa — kino YUBORILMAYDI.
+ */
+async function ensurePremiumMovieAccess(ctx: MyContext, movie: Movie): Promise<boolean> {
+  if (!movie.isPremium) return true;
+  const uid = ctx.from?.id;
+  if (uid && isAdmin(uid)) return true;
+
+  const user = uid ? await prisma.user.findUnique({ where: { id: BigInt(uid) } }) : null;
+  if (isPremiumActive(user?.premiumUntil)) return true;
+
+  await sendPremiumPrompt(
+    ctx,
+    `🔒 <b>"${movie.title}"</b> — <b>Premium kino</b>.\nUni ko'rish uchun premium obuna kerak.`
+  );
+  return false;
+}
+
+/** Kinoni yuboradi. Premium kino bo'lib, foydalanuvchi premium bo'lmasa — yubormaydi (false). */
+export async function sendMovie(ctx: MyContext, movie: Movie): Promise<boolean> {
+  if (!(await ensurePremiumMovieAccess(ctx, movie))) return false;
+
   const enabled = await getBool(KEYS.movieBtnEnabled, true);
   const globalBtn = enabled ? await getGlobalButton("movie") : null;
   await ctx.replyWithVideo(movie.fileId, {
@@ -22,6 +48,7 @@ export async function sendMovie(ctx: MyContext, movie: Movie) {
     data: { views: { increment: 1 } },
   });
   await sendPostDeliveryMessage(ctx);
+  return true;
 }
 
 /** Kino yuborilgandan keyin qo'shimcha reklama/post xabari (admin sozlaydi, o'chirib/yoqib qo'yiladi) */

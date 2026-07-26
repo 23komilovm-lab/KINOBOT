@@ -17,27 +17,127 @@ function can(ctx: MyContext): boolean {
 
 // ─── Asosiy menyu ────────────────────────────────────────────────────────────
 async function menuData() {
-  const [enabled, pending, premiumCount] = await Promise.all([
+  const [enabled, pending, premiumCount, premMovies] = await Promise.all([
     getBool(KEYS.premiumEnabled, false),
     prisma.payment.count({ where: { status: "pending" } }),
     prisma.user.count({ where: { premiumUntil: { gt: new Date() } } }),
+    prisma.movie.count({ where: { isPremium: true } }),
   ]);
 
   const text =
     `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium boshqaruvi</b>\n\n` +
     `Tizim: <b>${enabled ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>\n` +
     `Premium foydalanuvchilar: <b>${premiumCount}</b>\n` +
+    `Premium kinolar: <b>${premMovies}</b>\n` +
     `Kutilayotgan to'lovlar: <b>${pending}</b>`;
 
   const markup = kb(
     [ibtn(`💳 Kutilayotgan to'lovlar (${pending})`, "prm:pending:0", "primary")],
     [ibtn("🏷 Tariflar", "prm:tariffs", "primary"), ibtn("⚙️ Sozlamalar", "prm:settings", "primary")],
+    [ibtn(`🎬 Premium kinolar (${premMovies})`, "prm:movies:0", "primary")],
     [ibtn("🎁 Qo'lda premium berish", "prm:grant", "success")],
     [ibtn("👥 Premium foydalanuvchilar", "prm:users:0", "primary")],
     [ibtn("Orqaga", "botset:back", undefined, BE.backMenu)],
   );
   return { text, markup };
 }
+
+// ─── Premium kinolar ─────────────────────────────────────────────────────────
+const MOVIES_PAGE = 8;
+
+async function renderPremiumMovies(ctx: MyContext, page: number) {
+  const total = await prisma.movie.count({ where: { isPremium: true } });
+  const movies = await prisma.movie.findMany({
+    where: { isPremium: true },
+    orderBy: { views: "desc" },
+    skip: page * MOVIES_PAGE,
+    take: MOVIES_PAGE,
+  });
+
+  const lines = movies.length
+    ? movies.map((m) => `🔒 <code>${m.code}</code> · <b>${e.escapeHtml(m.title)}</b> — ${m.views} 👁`).join("\n")
+    : "Hozircha premium kino yo'q.";
+
+  // Har bir kinoni bosib premiumdan chiqarish
+  const rows: ReturnType<typeof ibtn>[][] = movies.map((m) => [
+    ibtn(`🔓 ${m.code} · ${m.title}`.slice(0, 60), `prm:munset:${m.id}:${page}`, "danger"),
+  ]);
+
+  const pages = Math.max(1, Math.ceil(total / MOVIES_PAGE));
+  const nav: ReturnType<typeof ibtn>[] = [];
+  if (page > 0) nav.push(ibtn("◀️", `prm:movies:${page - 1}`));
+  if (pages > 1) nav.push(ibtn(`${page + 1}/${pages}`, "noop:prm"));
+  if (page < pages - 1) nav.push(ibtn("▶️", `prm:movies:${page + 1}`));
+  if (nav.length) rows.push(nav);
+
+  rows.push([ibtn("➕ Kod bo'yicha qo'shish", "prm:madd", "success")]);
+  rows.push([ibtn("🔥 Eng ko'p ko'rilganlarni qo'shish", "prm:mtop", "primary")]);
+  if (total > 0) rows.push([ibtn("🔓 Hammasini bo'shatish", "prm:mclear", "danger")]);
+  rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
+
+  const text =
+    `🎬 <b>Premium kinolar</b> (${total})\n\n${lines}\n\n` +
+    `<i>Bu kinolarni faqat premium obunachilar ko'radi. Oddiy foydalanuvchi kodni yozsa — ` +
+    `premium obuna taklif qilinadi.\nPremiumdan chiqarish uchun kino tugmasini bosing.</i>`;
+
+  await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
+}
+
+premiumAdminHandler.callbackQuery(/^prm:movies:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await renderPremiumMovies(ctx, Number(ctx.match[1]));
+});
+
+premiumAdminHandler.callbackQuery(/^prm:munset:(\d+):(\d+)$/, async (ctx) => {
+  const [id, page] = [Number(ctx.match[1]), Number(ctx.match[2])];
+  const m = await prisma.movie.update({ where: { id }, data: { isPremium: false } }).catch(() => null);
+  await ctx.answerCallbackQuery({ text: m ? `🔓 "${m.title}" premiumdan chiqarildi.` : "Topilmadi." });
+  await renderPremiumMovies(ctx, page);
+});
+
+premiumAdminHandler.callbackQuery("prm:madd", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "movieadd" };
+  await ctx.reply(
+    `➕ <b>Premium kino qo'shish</b>\n\n` +
+    `Kino <b>kodini</b> yuboring (faqat raqam).\n` +
+    `Bir nechta bo'lsa vergul yoki bo'shliq bilan: <code>12, 45, 78</code>`
+  );
+});
+
+premiumAdminHandler.callbackQuery("prm:mtop", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `🔥 <b>Eng ko'p ko'rilgan kinolarni premium qilish</b>\n\nNechtasini premium qilamiz?`,
+    {
+      reply_markup: kb(
+        [
+          ibtn("Top 5", "prm:mtopn:5", "primary"),
+          ibtn("Top 10", "prm:mtopn:10", "primary"),
+          ibtn("Top 20", "prm:mtopn:20", "primary"),
+        ],
+        [ibtn("Orqaga", "prm:movies:0", undefined, BE.backMenu)],
+      ),
+    }
+  ).catch(() => {});
+});
+
+premiumAdminHandler.callbackQuery(/^prm:mtopn:(\d+)$/, async (ctx) => {
+  const n = Number(ctx.match[1]);
+  const top = await prisma.movie.findMany({ orderBy: { views: "desc" }, take: n, select: { id: true } });
+  await prisma.movie.updateMany({
+    where: { id: { in: top.map((m) => m.id) } },
+    data: { isPremium: true },
+  });
+  await ctx.answerCallbackQuery({ text: `🔒 Top ${n} kino premium qilindi.`, show_alert: true });
+  await renderPremiumMovies(ctx, 0);
+});
+
+premiumAdminHandler.callbackQuery("prm:mclear", async (ctx) => {
+  const res = await prisma.movie.updateMany({ where: { isPremium: true }, data: { isPremium: false } });
+  await ctx.answerCallbackQuery({ text: `🔓 ${res.count} kino premiumdan chiqarildi.`, show_alert: true });
+  await renderPremiumMovies(ctx, 0);
+});
 
 premiumAdminHandler.hears(ADMIN_MENU_BUTTONS.premium, async (ctx) => {
   if (!can(ctx)) return;
@@ -444,6 +544,30 @@ premiumAdminHandler.on("message:text", async (ctx, next) => {
     if (Number.isNaN(n) || n < 0) { await ctx.reply("❌ Faqat musbat raqam."); return; }
     await setSetting(KEYS.freeAiLimit, String(n));
     await ctx.reply(`✅ Bepul AI so'rovlari/kun: <b>${n}</b>`);
+    return;
+  }
+  if (s.prmField === "movieadd") {
+    delete s.prmField;
+    const codes = text.split(/[\s,]+/).map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n));
+    if (codes.length === 0) {
+      await ctx.reply("❌ Kod topilmadi. Faqat raqam yuboring, masalan: <code>12, 45</code>");
+      return;
+    }
+    const found = await prisma.movie.findMany({ where: { code: { in: codes } } });
+    if (found.length === 0) {
+      await ctx.reply(`❌ Bunday kodli kino topilmadi: <code>${codes.join(", ")}</code>`);
+      return;
+    }
+    await prisma.movie.updateMany({
+      where: { id: { in: found.map((m) => m.id) } },
+      data: { isPremium: true },
+    });
+    const missing = codes.filter((c) => !found.some((m) => m.code === c));
+    await ctx.reply(
+      `🔒 <b>Premium qilindi (${found.length}):</b>\n` +
+      found.map((m) => `• <code>${m.code}</code> ${e.escapeHtml(m.title)}`).join("\n") +
+      (missing.length ? `\n\n⚠️ Topilmadi: <code>${missing.join(", ")}</code>` : "")
+    );
     return;
   }
   if (s.prmField === "pay") {
