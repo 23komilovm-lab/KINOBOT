@@ -207,10 +207,34 @@ async function main() {
       secretToken: secret,
     });
 
-    createServer(handle).listen(port, () => {
+    // GET so'rovlar (health-check / keep-alive ping) webhook handleriga tushmasin —
+    // ular darhol 200 oladi. Faqat POST Telegram update sifatida qayta ishlanadi.
+    createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("ok");
+        return;
+      }
+      handle(req, res);
+    }).listen(port, () => {
       console.log(`🌐 @${me.username} webhook rejimda: port ${port}`);
       console.log(`🔗 Webhook URL: ${webhookUrl}`);
     });
+
+    // ===== KEEP-ALIVE =====
+    // Render/Fly kabi bepul tariflar 15 daqiqa HTTP trafigi bo'lmasa xizmatni
+    // uxlatib qo'yadi. Uxlagandan keyin "sovuq start" 30-60s oladi va Telegram
+    // webhook'ni kutmay "Read timeout" beradi — xabarlar navbatda qolib ketadi.
+    // Shuning uchun har 10 daqiqada o'zimizga GET yuborib, uyg'oq turamiz.
+    if (process.env.DISABLE_KEEPALIVE !== "true") {
+      const KEEPALIVE_MS = 10 * 60 * 1000;
+      setInterval(() => {
+        fetch(webhookUrl, { method: "GET" })
+          .then((r) => { if (!r.ok) console.warn("⚠️ Keep-alive javobi:", r.status); })
+          .catch((err) => console.warn("⚠️ Keep-alive xatosi:", (err as Error).message));
+      }, KEEPALIVE_MS);
+      console.log(`💓 Keep-alive yoqilgan (har ${KEEPALIVE_MS / 60000} daqiqada)`);
+    }
   } else {
     // ===== POLLING rejimi (lokal / Railway) =====
     await bot.api.deleteWebhook();
