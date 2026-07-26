@@ -37,14 +37,17 @@ export function activeTariffs() {
 
 /**
  * Standart 3 ta tarifni qo'shadi (agar hech qanday tarif bo'lmasa).
- * Aksiya narxlari — eski narxdan 80% chegirma (oldPrice ustidan chizilgan holda ko'rsatiladi).
- * Kunlik xarajat uzoq muddatda yana arzonlashadi (1 yil eng foydali):
- * 1 oy: 167 so'm/kun · 3 oy: 133 so'm/kun (~20% arzon) · 1 yil: 99 so'm/kun (~41% arzon)
+ * Aksiya narxlari (oldPrice ustidan chizilgan holda ko'rsatiladi):
+ *  · 1 oy  — asosiy narx 5 000 so'm (eski 25 000 ga nisbatan -80% maxsus taklif)
+ *  · 3 oy  — oylik narxda 3×5 000 = 15 000 bo'lardi, 40% chegirma bilan 9 000
+ *  · 1 yil — oylik narxda 12×5 000 = 60 000 bo'lardi, 50% chegirma bilan 30 000
+ * Kunlik xarajat uzoq muddatda arzonlashadi, ya'ni 1 yil eng foydali:
+ * 1 oy: 167 so'm/kun · 3 oy: 100 so'm/kun · 1 yil: 82 so'm/kun
  */
 export const DEFAULT_TARIFFS = [
-  { label: "1 oy",  days: 30,  price: 5000,  oldPrice: 25000,  sortOrder: 0 },
-  { label: "3 oy",  days: 90,  price: 12000, oldPrice: 60000,  sortOrder: 1 },
-  { label: "1 yil", days: 365, price: 36000, oldPrice: 180000, sortOrder: 2 },
+  { label: "1 oy",  days: 30,  price: 5000,  oldPrice: 25000, starsPrice: 35,  sortOrder: 0 },
+  { label: "3 oy",  days: 90,  price: 9000,  oldPrice: 15000, starsPrice: 60,  sortOrder: 1 },
+  { label: "1 yil", days: 365, price: 30000, oldPrice: 60000, starsPrice: 200, sortOrder: 2 },
 ];
 
 export async function seedDefaultTariffs(): Promise<boolean> {
