@@ -377,7 +377,7 @@ async function renderTariffs(ctx: MyContext) {
   ]]);
   rows.push([ibtn("➕ Tarif qo'shish", "prm:tadd", "success")]);
   if (tariffs.length === 0) rows.push([ibtn("✨ Namuna tariflar qo'shish", "prm:tseed", "primary")]);
-  rows.push([ibtn("🔥 Aksiya narxlarini qo'yish (5 000 / 9 000 / 30 000)", "prm:treset", "success")]);
+  rows.push([ibtn("🔥 Standart narxlarni qo'yish (10 000 / 18 000 / 27 000 / 50 000)", "prm:treset", "success")]);
   if (tariffs.some((t) => !t.starsPrice)) {
     rows.push([ibtn("⭐ Stars narxlarini avtomatik belgilash", "prm:tstarsauto", "success")]);
   }
@@ -399,7 +399,7 @@ premiumAdminHandler.callbackQuery("prm:tariffs", async (ctx) => {
 premiumAdminHandler.callbackQuery("prm:tseed", async (ctx) => {
   const added = await seedDefaultTariffs();
   await ctx.answerCallbackQuery({
-    text: added ? "✨ 3 ta namuna tarif qo'shildi. Narxlarni tahrirlang." : "Tariflar allaqachon bor.",
+    text: added ? "✨ 4 ta namuna tarif qo'shildi. Narxlarni tahrirlang." : "Tariflar allaqachon bor.",
     show_alert: true,
   });
   await renderTariffs(ctx);
@@ -408,7 +408,7 @@ premiumAdminHandler.callbackQuery("prm:tseed", async (ctx) => {
 // Aksiya narxlarini majburan qayta yozadi (mavjud tariflar o'rniga)
 premiumAdminHandler.callbackQuery("prm:treset", async (ctx) => {
   await resetToDefaultTariffs();
-  await ctx.answerCallbackQuery({ text: "🔥 Aksiya narxlari qo'yildi (5 000 / 9 000 / 30 000 so'm).", show_alert: true });
+  await ctx.answerCallbackQuery({ text: "🔥 Standart narxlar qo'yildi (10 000 / 18 000 / 27 000 / 50 000 so'm).", show_alert: true });
   await renderTariffs(ctx);
 });
 

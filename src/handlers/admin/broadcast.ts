@@ -6,9 +6,7 @@ import {
   ADMIN_MENU_BUTTONS, BOT_SETTINGS_TEXT, adminMenuKeyboard, ibtn, BE, kb,
 } from "../../utils/keyboard.js";
 import { resolveButtonStyle } from "../../utils/contentButton.js";
-import {
-  formatUzDateTime, formatYmd, parseYmd, rangeFromStrings,
-} from "../../utils/dateRange.js";
+import { formatUzDateTime } from "../../utils/dateRange.js";
 import {
   acquireBulkLock, bulkSend, cancelBulk, formatBulkResult, isBulkCancelled,
   isBulkRunning, releaseBulkLock, type BulkResult,
@@ -50,7 +48,7 @@ interface InlineBtn {
 
 interface BcastData {
   state: string;
-  target: { type: string; dateFrom?: string; dateTo?: string; region?: string; surveyId?: number; optionId?: number };
+  target: { type: string; region?: string; surveyId?: number; optionId?: number };
   templateChatId?: number;
   templateMsgId?: number;
   buttons: InlineBtn[][];
@@ -90,10 +88,7 @@ function buildInlineKb(buttons: InlineBtn[][]) {
 
 function broadcastMenu() {
   return kb(
-    [
-      ibtn("📤 Hammaga yuborish",       "bc:target:all",       "primary"),
-      ibtn("📅 Sana oralig'i",          "bc:target:daterange", "primary"),
-    ],
+    [ibtn("📤 Hammaga yuborish", "bc:target:all", "primary")],
     [
       ibtn("🗺 Viloyat bo'yicha",        "bc:target:region",    "success"),
       ibtn("📊 Funnel javobchilari",     "bc:target:funnel",    "success"),
@@ -138,15 +133,6 @@ broadcastHandler.callbackQuery("bc:target:all", async (ctx) => {
   setBcast(ctx, { state: "compose", target: { type: "all" }, buttons: [] });
   await ctx.editMessageText(
     `👥 Jami: <b>${count}</b> ta foydalanuvchi\n\nXabarni yuboring (matn, rasm, video, fayl):`,
-    { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
-  ).catch(() => {});
-});
-
-broadcastHandler.callbackQuery("bc:target:daterange", async (ctx) => {
-  await ctx.answerCallbackQuery();
-  setBcast(ctx, { state: "dateFrom", target: { type: "daterange" }, buttons: [] });
-  await ctx.editMessageText(
-    `📅 <b>Sana oralig'i bo'yicha</b>\n\nBoshlanish sanasini kiriting:\nFormat: <code>DD.MM.YYYY</code>`,
     { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
   ).catch(() => {});
 });
@@ -268,42 +254,6 @@ broadcastHandler.on("message", async (ctx, next) => {
     clearBcast(ctx);
     await ctx.reply("ℹ️ Xabar yuborish bekor qilindi (boshqa bo'limga o'tdingiz).");
     return next();
-  }
-
-  // ── Sana kiritish ──
-  if (bcast.state === "dateFrom") {
-    const p = parseYmd(text ?? "");
-    if (!p) { await ctx.reply("❌ Format: <code>DD.MM.YYYY</code> (mavjud sana bo'lsin)"); return; }
-    bcast.target.dateFrom = formatYmd(p);
-    bcast.state = "dateTo";
-    setBcast(ctx, bcast);
-    await ctx.reply(
-      `✅ Boshlanish: <b>${formatYmd(p)}</b>\n\nTugash sanasini kiriting (shu sana kiradi):\nFormat: <code>DD.MM.YYYY</code>`,
-      { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
-    );
-    return;
-  }
-
-  if (bcast.state === "dateTo") {
-    const p = parseYmd(text ?? "");
-    if (!p) { await ctx.reply("❌ Format: <code>DD.MM.YYYY</code> (mavjud sana bo'lsin)"); return; }
-    const range = rangeFromStrings(bcast.target.dateFrom!, formatYmd(p));
-    if (!range) {
-      await ctx.reply("❌ Tugash sanasi boshlanish sanasidan oldin bo'lishi mumkin emas.");
-      return;
-    }
-    const count = await prisma.user.count({
-      where: { isBlocked: false, createdAt: range },
-    });
-    bcast.target.dateTo = formatYmd(p);
-    bcast.state = "compose";
-    setBcast(ctx, bcast);
-    await ctx.reply(
-      `✅ Sana: <b>${bcast.target.dateFrom} – ${bcast.target.dateTo}</b> (Toshkent vaqti)\n` +
-      `👥 Foydalanuvchilar: <b>${count}</b>\n\nXabarni yuboring:`,
-      { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
-    );
-    return;
   }
 
   // ── Knopka matni ──
@@ -475,7 +425,6 @@ async function showPreview(ctx: MyContext, bcast: BcastData) {
 
 function targetLabel(bcast: BcastData): string {
   if (bcast.target.type === "all") return "Hammaga";
-  if (bcast.target.type === "daterange") return `Sana: ${bcast.target.dateFrom} – ${bcast.target.dateTo}`;
   if (bcast.target.type === "region") return `Viloyat: ${bcast.target.region}`;
   if (bcast.target.type === "funnel") return `Funnel javobchilari`;
   return "?";
@@ -889,16 +838,6 @@ async function getTargetUsers(bcast: BcastData): Promise<bigint[]> {
 
   if (t.type === "all") {
     const rows = await prisma.user.findMany({ where: { isBlocked: false }, select: { id: true } });
-    return rows.map((r) => r.id);
-  }
-
-  if (t.type === "daterange" && t.dateFrom && t.dateTo) {
-    const range = rangeFromStrings(t.dateFrom, t.dateTo);
-    if (!range) return [];
-    const rows = await prisma.user.findMany({
-      where: { isBlocked: false, createdAt: range },
-      select: { id: true },
-    });
     return rows.map((r) => r.id);
   }
 

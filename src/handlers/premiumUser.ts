@@ -26,9 +26,7 @@ export async function sendPremiumPrompt(ctx: MyContext, reason?: string, edit = 
     `✅ <b>Cheksiz</b> kino va serial — limitsiz\n` +
     `✅ <b>Majburiy obunasiz</b> — hech qanday kanal so'ralmaydi\n` +
     `✅ <b>Cheksiz AI yordamchi</b> — tavsiya + rasm orqali kino topish\n` +
-    `✅ Reklama va kutishlarsiz, eng tez xizmat\n\n` +
-    `🔥 <b>MAXSUS TAKLIF — faqat siz uchun shu narxda!</b>\n` +
-    `<i>Aksiya muddati cheklangan, shoshiling.</i>\n\n`;
+    `✅ Reklama va kutishlarsiz, eng tez xizmat\n\n`;
 
   if (tariffs.length === 0) {
     const text = head + `Hozircha tariflar sozlanmagan. Admin bilan bog'laning.`;

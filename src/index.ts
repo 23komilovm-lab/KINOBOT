@@ -18,7 +18,6 @@ import { premiumHandler } from "./handlers/premiumUser.js";
 import { startAutoBackup } from "./services/autoBackup.js";
 import { startPremiumExpiryWatcher } from "./services/premiumExpiry.js";
 import { initAiUsageTracking } from "./services/aiUsage.js";
-import { indexVideoMovie } from "./services/ingest.js";
 import { continueSurveyChain } from "./handlers/admin/funnel.js";
 import { nearestRegion } from "./utils/regions.js";
 import { getBool, KEYS } from "./utils/settings.js";
@@ -105,23 +104,9 @@ bot.on("chat_member", async (ctx) => {
   }
 });
 
-// ===== Manba kanallardan avto-indekslash (channel_post) =====
-bot.on("channel_post:video", async (ctx) => {
-  const chatId = ctx.chat.id;
-  const src = await prisma.sourceChannel.findUnique({ where: { chatId: BigInt(chatId) } });
-  if (!src) return; // faqat ro'yxatdagi manba kanallar
-
-  const v = ctx.msg.video;
-  if (!v) return;
-  const res = await indexVideoMovie({
-    fileId: v.file_id,
-    caption: ctx.msg.caption ?? null,
-    duration: v.duration ?? null,
-  });
-  if (res.status === "created") {
-    console.log(`📥 Manba kanaldan indekslandi: "${res.title}" (kod ${res.code}) — ${src.title}`);
-  }
-});
+// Manba kanallardan avto-indekslash o'chirilgan (admin so'roviga ko'ra) —
+// bot.on("channel_post:video", ...) olib tashlandi. sourceChannel jadvali va
+// SourceChannel yozuvlari bazada saqlanib qoladi, kerak bo'lsa qayta yoqiladi.
 
 // ===== Handler'lar (tartib muhim!) =====
 bot.use(adminHandler);      // admin panel (faqat adminlar)
