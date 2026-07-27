@@ -6,7 +6,7 @@ import { getUnsubscribedChannels } from "../utils/subscription.js";
 import { checkContentAccess, countContentRequest } from "../utils/access.js";
 import { attachReferrer, confirmReferral } from "../utils/referral.js";
 import { sendReferralInfo } from "./referral.js";
-import { sendMovie } from "../services/media.js";
+import { sendMovie, pickRandomMovie } from "../services/media.js";
 import { sendPremiumPrompt } from "./premiumUser.js";
 import { sendSerialSeasons } from "./serialView.js";
 import type { MyContext } from "../types.js";
@@ -94,9 +94,10 @@ startHandler.command("start", async (ctx) => {
 });
 
 // Obuna tekshirish — yangi xabar YUBORILMAYDI, faqat popup
+// Kesh bypass qilinadi — foydalanuvchi aynan hozir qo'shilganini tekshirmoqchi
 startHandler.callbackQuery("sub:check", async (ctx) => {
   const uid = ctx.from.id;
-  const notJoined = await getUnsubscribedChannels(ctx, uid);
+  const notJoined = await getUnsubscribedChannels(ctx, uid, { bypassCache: true });
   const blocking  = notJoined.filter((c) => c.type !== "INSTAGRAM");
 
   if (blocking.length === 0) {
@@ -129,9 +130,7 @@ startHandler.callbackQuery("start:referal", async (ctx) => {
 startHandler.callbackQuery("start:random", async (ctx) => {
   await ctx.answerCallbackQuery();
   if (!(await checkContentAccess(ctx, false))) return;
-  const total = await prisma.movie.count();
-  if (total === 0) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
-  const skip = Math.floor(Math.random() * total);
-  const [movie] = await prisma.movie.findMany({ skip, take: 1 });
-  if (movie && (await sendMovie(ctx, movie))) await countContentRequest(ctx);
+  const movie = await pickRandomMovie(ctx);
+  if (!movie) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
+  if (await sendMovie(ctx, movie)) await countContentRequest(ctx);
 });

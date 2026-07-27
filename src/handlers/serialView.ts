@@ -3,6 +3,7 @@ import { prisma } from "../prisma.js";
 import { ce, e } from "../utils/emoji.js";
 import { contentButtonMarkup } from "../utils/contentButton.js";
 import { getGlobalButton, getBool, KEYS } from "../utils/settings.js";
+import { ensurePremiumSerialAccess } from "../services/media.js";
 import type { MyContext } from "../types.js";
 
 export const serialViewHandler = new Composer<MyContext>();
@@ -124,6 +125,7 @@ serialViewHandler.callbackQuery(/^ep:(\d+)$/, async (ctx) => {
     await ctx.reply("❌ Qism topilmadi.");
     return;
   }
+  if (!(await ensurePremiumSerialAccess(ctx, ep.season.serial))) return;
 
   await ctx.replyWithVideo(ep.fileId, {
     caption:

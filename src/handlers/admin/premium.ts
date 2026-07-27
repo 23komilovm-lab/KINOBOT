@@ -17,11 +17,12 @@ function can(ctx: MyContext): boolean {
 
 // ─── Asosiy menyu ────────────────────────────────────────────────────────────
 async function menuData() {
-  const [enabled, pending, premiumCount, premMovies] = await Promise.all([
+  const [enabled, pending, premiumCount, premMovies, premSerials] = await Promise.all([
     getBool(KEYS.premiumEnabled, false),
     prisma.payment.count({ where: { status: "pending" } }),
     prisma.user.count({ where: { premiumUntil: { gt: new Date() } } }),
     prisma.movie.count({ where: { isPremium: true } }),
+    prisma.serial.count({ where: { isPremium: true } }),
   ]);
 
   const text =
@@ -29,12 +30,14 @@ async function menuData() {
     `Tizim: <b>${enabled ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>\n` +
     `Premium foydalanuvchilar: <b>${premiumCount}</b>\n` +
     `Premium kinolar: <b>${premMovies}</b>\n` +
+    `Premium seriallar: <b>${premSerials}</b>\n` +
     `Kutilayotgan to'lovlar: <b>${pending}</b>`;
 
   const markup = kb(
     [ibtn(`💳 Kutilayotgan to'lovlar (${pending})`, "prm:pending:0", "primary")],
     [ibtn("🏷 Tariflar", "prm:tariffs", "primary"), ibtn("⚙️ Sozlamalar", "prm:settings", "primary")],
     [ibtn(`🎬 Premium kinolar (${premMovies})`, "prm:movies:0", "primary")],
+    [ibtn(`📺 Premium seriallar (${premSerials})`, "prm:serials:0", "primary")],
     [ibtn("🎁 Qo'lda premium berish", "prm:grant", "success")],
     [ibtn("👥 Premium foydalanuvchilar", "prm:users:0", "primary")],
     [ibtn("Orqaga", "botset:back", undefined, BE.backMenu)],
@@ -137,6 +140,102 @@ premiumAdminHandler.callbackQuery("prm:mclear", async (ctx) => {
   const res = await prisma.movie.updateMany({ where: { isPremium: true }, data: { isPremium: false } });
   await ctx.answerCallbackQuery({ text: `🔓 ${res.count} kino premiumdan chiqarildi.`, show_alert: true });
   await renderPremiumMovies(ctx, 0);
+});
+
+// ─── Premium seriallar (Premium kinolar bilan bir xil oyna) ─────────────────
+const SERIALS_PAGE = 8;
+
+async function renderPremiumSerials(ctx: MyContext, page: number) {
+  const total = await prisma.serial.count({ where: { isPremium: true } });
+  const serials = await prisma.serial.findMany({
+    where: { isPremium: true },
+    orderBy: { views: "desc" },
+    skip: page * SERIALS_PAGE,
+    take: SERIALS_PAGE,
+  });
+
+  const lines = serials.length
+    ? serials.map((s) => `🔒 <code>${s.code}</code> · <b>${e.escapeHtml(s.title)}</b> — ${s.views} 👁`).join("\n")
+    : "Hozircha premium serial yo'q.";
+
+  const rows: ReturnType<typeof ibtn>[][] = serials.map((s) => [
+    ibtn(`🔓 ${s.code} · ${s.title}`.slice(0, 60), `prm:sunset:${s.id}:${page}`, "danger"),
+  ]);
+
+  const pages = Math.max(1, Math.ceil(total / SERIALS_PAGE));
+  const nav: ReturnType<typeof ibtn>[] = [];
+  if (page > 0) nav.push(ibtn("◀️", `prm:serials:${page - 1}`));
+  if (pages > 1) nav.push(ibtn(`${page + 1}/${pages}`, "noop:prm"));
+  if (page < pages - 1) nav.push(ibtn("▶️", `prm:serials:${page + 1}`));
+  if (nav.length) rows.push(nav);
+
+  rows.push([ibtn("➕ Kod bo'yicha qo'shish", "prm:sadd", "success")]);
+  rows.push([ibtn("🔥 Eng ko'p ko'rilganlarni qo'shish", "prm:stop", "primary")]);
+  if (total > 0) rows.push([ibtn("🔓 Hammasini bo'shatish", "prm:sclear", "danger")]);
+  rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
+
+  const text =
+    `📺 <b>Premium seriallar</b> (${total})\n\n${lines}\n\n` +
+    `<i>Bu seriallarni faqat premium obunachilar ko'radi. Oddiy foydalanuvchi biror qismni ` +
+    `ochsa — premium obuna taklif qilinadi.\nPremiumdan chiqarish uchun serial tugmasini bosing.</i>`;
+
+  await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
+}
+
+premiumAdminHandler.callbackQuery(/^prm:serials:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await renderPremiumSerials(ctx, Number(ctx.match[1]));
+});
+
+premiumAdminHandler.callbackQuery(/^prm:sunset:(\d+):(\d+)$/, async (ctx) => {
+  const [id, page] = [Number(ctx.match[1]), Number(ctx.match[2])];
+  const s = await prisma.serial.update({ where: { id }, data: { isPremium: false } }).catch(() => null);
+  await ctx.answerCallbackQuery({ text: s ? `🔓 "${s.title}" premiumdan chiqarildi.` : "Topilmadi." });
+  await renderPremiumSerials(ctx, page);
+});
+
+premiumAdminHandler.callbackQuery("prm:sadd", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "serialadd" };
+  await ctx.reply(
+    `➕ <b>Premium serial qo'shish</b>\n\n` +
+    `Serial <b>kodini</b> yuboring (faqat raqam).\n` +
+    `Bir nechta bo'lsa vergul yoki bo'shliq bilan: <code>12, 45, 78</code>`
+  );
+});
+
+premiumAdminHandler.callbackQuery("prm:stop", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `🔥 <b>Eng ko'p ko'rilgan seriallarni premium qilish</b>\n\nNechtasini premium qilamiz?`,
+    {
+      reply_markup: kb(
+        [
+          ibtn("Top 5", "prm:stopn:5", "primary"),
+          ibtn("Top 10", "prm:stopn:10", "primary"),
+          ibtn("Top 20", "prm:stopn:20", "primary"),
+        ],
+        [ibtn("Orqaga", "prm:serials:0", undefined, BE.backMenu)],
+      ),
+    }
+  ).catch(() => {});
+});
+
+premiumAdminHandler.callbackQuery(/^prm:stopn:(\d+)$/, async (ctx) => {
+  const n = Number(ctx.match[1]);
+  const top = await prisma.serial.findMany({ orderBy: { views: "desc" }, take: n, select: { id: true } });
+  await prisma.serial.updateMany({
+    where: { id: { in: top.map((s) => s.id) } },
+    data: { isPremium: true },
+  });
+  await ctx.answerCallbackQuery({ text: `🔒 Top ${n} serial premium qilindi.`, show_alert: true });
+  await renderPremiumSerials(ctx, 0);
+});
+
+premiumAdminHandler.callbackQuery("prm:sclear", async (ctx) => {
+  const res = await prisma.serial.updateMany({ where: { isPremium: true }, data: { isPremium: false } });
+  await ctx.answerCallbackQuery({ text: `🔓 ${res.count} serial premiumdan chiqarildi.`, show_alert: true });
+  await renderPremiumSerials(ctx, 0);
 });
 
 premiumAdminHandler.hears(ADMIN_MENU_BUTTONS.premium, async (ctx) => {
@@ -585,6 +684,30 @@ premiumAdminHandler.on("message:text", async (ctx, next) => {
     await ctx.reply(
       `🔒 <b>Premium qilindi (${found.length}):</b>\n` +
       found.map((m) => `• <code>${m.code}</code> ${e.escapeHtml(m.title)}`).join("\n") +
+      (missing.length ? `\n\n⚠️ Topilmadi: <code>${missing.join(", ")}</code>` : "")
+    );
+    return;
+  }
+  if (s.prmField === "serialadd") {
+    delete s.prmField;
+    const codes = text.split(/[\s,]+/).map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n));
+    if (codes.length === 0) {
+      await ctx.reply("❌ Kod topilmadi. Faqat raqam yuboring, masalan: <code>12, 45</code>");
+      return;
+    }
+    const found = await prisma.serial.findMany({ where: { code: { in: codes } } });
+    if (found.length === 0) {
+      await ctx.reply(`❌ Bunday kodli serial topilmadi: <code>${codes.join(", ")}</code>`);
+      return;
+    }
+    await prisma.serial.updateMany({
+      where: { id: { in: found.map((s) => s.id) } },
+      data: { isPremium: true },
+    });
+    const missing = codes.filter((c) => !found.some((s) => s.code === c));
+    await ctx.reply(
+      `🔒 <b>Premium qilindi (${found.length}):</b>\n` +
+      found.map((s) => `• <code>${s.code}</code> ${e.escapeHtml(s.title)}`).join("\n") +
       (missing.length ? `\n\n⚠️ Topilmadi: <code>${missing.join(", ")}</code>` : "")
     );
     return;

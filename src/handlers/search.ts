@@ -2,7 +2,7 @@ import { Composer, InlineKeyboard } from "grammy";
 import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { ce, e } from "../utils/emoji.js";
-import { sendMovie } from "../services/media.js";
+import { sendMovie, pickRandomMovie } from "../services/media.js";
 import { checkContentAccess, countContentRequest } from "../utils/access.js";
 import { confirmReferral } from "../utils/referral.js";
 import { sendSerialSeasons } from "./serialView.js";
@@ -44,11 +44,9 @@ searchHandler.command("mashhur", async (ctx) => {
 // ─── /random — tasodifiy kino ────────────────────────────────────────────────
 searchHandler.command("random", async (ctx) => {
   if (!(await checkAccess(ctx))) return;
-  const total = await prisma.movie.count();
-  if (total === 0) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
-  const skip = Math.floor(Math.random() * total);
-  const [movie] = await prisma.movie.findMany({ skip, take: 1 });
-  if (movie && (await sendMovie(ctx, movie))) await countContentRequest(ctx);
+  const movie = await pickRandomMovie(ctx);
+  if (!movie) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
+  if (await sendMovie(ctx, movie)) await countContentRequest(ctx);
 });
 
 // ─── Qidiruv knopkasi: ko'p ko'rilgan / inline ───────────────────────────────
@@ -115,19 +113,40 @@ searchHandler.on("message:text", async (ctx, next) => {
     return;
   }
 
+  // Juda qisqa so'rov — to'liq jadval skanini isrof qilmaymiz, gate'dan oldin qaytamiz
+  if (text.length < MIN_QUERY_LEN) {
+    await ctx.reply("🔎 Qidiruv uchun kamida 2 ta harf kiriting.");
+    return;
+  }
+
   if (!(await checkAccess(ctx))) return;
   await searchByName(ctx, text);
 });
+
+const MIN_QUERY_LEN = 2;
+const SEARCH_PAGE = 10;
+const SEARCH_FETCH_LIMIT = 50;
+
+interface SearchItem {
+  id: number;
+  kind: "movie" | "serial";
+  code: number;
+  title: string;
+}
+interface SearchState {
+  query: string;
+  items: SearchItem[];
+}
 
 async function searchByName(ctx: MyContext, query: string) {
   const [movies, serials] = await Promise.all([
     prisma.movie.findMany({
       where: { title: { contains: query, mode: "insensitive" } },
-      take: 20, orderBy: { views: "desc" },
+      take: SEARCH_FETCH_LIMIT, orderBy: { views: "desc" },
     }),
     prisma.serial.findMany({
       where: { title: { contains: query, mode: "insensitive" } },
-      take: 20, orderBy: { views: "desc" },
+      take: SEARCH_FETCH_LIMIT, orderBy: { views: "desc" },
     }),
   ]);
 
@@ -146,18 +165,54 @@ async function searchByName(ctx: MyContext, query: string) {
     return;
   }
 
-  const kb = new InlineKeyboard();
-  for (const m of movies) kb.text(`${m.title} (${m.code})`, `movie:${m.id}`).row();
-  for (const s of serials) kb.text(`${s.title} (${s.code})`, `serial:${s.id}`).row();
-
-  // Inline qidiruv knopkasi
-  kb.switchInlineCurrent(`🔎 Inline: ${query}`, query);
-
-  await ctx.reply(
-    `${ce("list")} <b>Topildi (${movies.length + serials.length}):</b>`,
-    { reply_markup: kb }
-  );
+  const items: SearchItem[] = [
+    ...movies.map((m): SearchItem => ({ id: m.id, kind: "movie", code: m.code, title: m.title })),
+    ...serials.map((s): SearchItem => ({ id: s.id, kind: "serial", code: s.code, title: s.title })),
+  ];
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), searchResults: { query, items } as SearchState };
+  await renderSearchResults(ctx, 0, false);
 }
+
+async function renderSearchResults(ctx: MyContext, page: number, edit: boolean) {
+  const state = ctx.session.scratch?.searchResults as SearchState | undefined;
+  if (!state) {
+    const text = "🔎 Qidiruv natijasi eskirgan. Iltimos, qaytadan qidiring.";
+    if (edit) await ctx.editMessageText(text).catch(() => ctx.reply(text));
+    else await ctx.reply(text);
+    return;
+  }
+
+  const { items, query } = state;
+  const pageItems = items.slice(page * SEARCH_PAGE, page * SEARCH_PAGE + SEARCH_PAGE);
+
+  const kb = new InlineKeyboard();
+  for (const it of pageItems) kb.text(`${it.title} (${it.code})`, `${it.kind}:${it.id}`).row();
+  kb.switchInlineCurrent(`🔎 Inline: ${query}`, query).row();
+
+  const pages = Math.ceil(items.length / SEARCH_PAGE);
+  if (page > 0) kb.text("◀️", `search:page:${page - 1}`);
+  kb.text("❌", "search:close");
+  if (page < pages - 1) kb.text("▶️", `search:page:${page + 1}`);
+
+  const text = `${ce("list")} <b>Topildi (${items.length}):</b>`;
+  if (edit) {
+    await ctx.editMessageText(text, { reply_markup: kb }).catch(async () => {
+      await ctx.reply(text, { reply_markup: kb });
+    });
+  } else {
+    await ctx.reply(text, { reply_markup: kb });
+  }
+}
+
+searchHandler.callbackQuery(/^search:page:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await renderSearchResults(ctx, Number(ctx.match[1]), true);
+});
+
+searchHandler.callbackQuery("search:close", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.deleteMessage().catch(() => {});
+});
 
 // Natijadan kino
 // Gate shu yerda ham kerak: qidiruv natijasidagi ro'yxatdan ketma-ket bosib,

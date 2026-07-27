@@ -249,6 +249,7 @@ model Serial {
   posterId    String?
   year        Int?
   genre       String?
+  isPremium   Boolean  @default(false) // faqat premium obunachilar ko'radi
   buttonText  String?
   buttonUrl   String?
   buttonStyle String   @default("primary")

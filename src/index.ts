@@ -165,6 +165,7 @@ async function main() {
   await bot.api.setMyCommands([
     { command: "start",   description: "Botni ishga tushirish" },
     { command: "ai",      description: "AI yordamchi" },
+    { command: "premium", description: "Premium obuna" },
     { command: "referal", description: "Referal / pul ishlash" },
     { command: "mashhur", description: "Eng ko'p ko'rilgan kinolar" },
     { command: "random",  description: "Tasodifiy kino" },

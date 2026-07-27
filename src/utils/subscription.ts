@@ -10,6 +10,15 @@ const SUBSCRIBED_STATUSES = ["creator", "administrator", "member", "restricted"]
 const lastSync = new Map<string, number>();
 const SYNC_TTL_MS = 60 * 60 * 1000;
 
+// A'zolik keshi — har content so'rovida (matn, inline, ...) har kanal uchun
+// getChatMember chaqirilardi. Musbat natija uzoqroq (past xavf — premium holati
+// ham real vaqtda qayta tekshirilmaydi), manfiy natija qisqa (haqiqiy a'zoni
+// tez tuzatishi kerak) saqlanadi. "Tekshirish" tugmasi har doim bypass qiladi.
+type MembershipEntry = { subscribed: boolean; expiresAt: number };
+const membershipCache = new Map<string, MembershipEntry>(); // key: `${chatId}:${userId}`
+const SUB_POSITIVE_TTL_MS = 10 * 60 * 1000;
+const SUB_NEGATIVE_TTL_MS = 20 * 1000;
+
 /**
  * Kanal ma'lumotini Telegramdan qayta oladi va tur o'zgargan bo'lsa yangilaydi
  * (ommaviy↔maxfiy). REQUEST/INSTAGRAM tegilmaydi.
@@ -45,7 +54,8 @@ async function maybeSyncChannel(ctx: MyContext, ch: Channel): Promise<Channel> {
 /** Foydalanuvchi a'zo bo'lmagan (yoki so'rov yubormagan) kanallarni qaytaradi */
 export async function getUnsubscribedChannels(
   ctx: MyContext,
-  userId: number
+  userId: number,
+  opts?: { bypassCache?: boolean }
 ): Promise<Channel[]> {
   const raw = await prisma.channel.findMany({
     where: { isActive: true },
@@ -59,12 +69,23 @@ export async function getUnsubscribedChannels(
       // Instagram: API orqali tekshirib bo'lmaydi — har doim ko'rsatiladi
       if (ch.type === "INSTAGRAM") return { channel: ch, isSubscribed: false };
 
-      // Avval Telegram membershipni tekshirish
-      const member = await ctx.api
-        .getChatMember(Number(ch.chatId), userId)
-        .catch(() => null);
+      const cacheKey = `${ch.chatId}:${userId}`;
+      const cached = !opts?.bypassCache ? membershipCache.get(cacheKey) : undefined;
+      let isSub: boolean;
+      if (cached && cached.expiresAt > Date.now()) {
+        isSub = cached.subscribed;
+      } else {
+        const member = await ctx.api
+          .getChatMember(Number(ch.chatId), userId)
+          .catch(() => null);
+        isSub = !!(member && SUBSCRIBED_STATUSES.includes(member.status));
+        membershipCache.set(cacheKey, {
+          subscribed: isSub,
+          expiresAt: Date.now() + (isSub ? SUB_POSITIVE_TTL_MS : SUB_NEGATIVE_TTL_MS),
+        });
+      }
 
-      if (member && SUBSCRIBED_STATUSES.includes(member.status)) {
+      if (isSub) {
         return { channel: ch, isSubscribed: true };
       }
 

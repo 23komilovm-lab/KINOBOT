@@ -6,7 +6,7 @@ import { isPremiumActive } from "../utils/premium.js";
 import { sendPremiumPrompt } from "../handlers/premiumUser.js";
 import { movieChannelCaption } from "./movieChannel.js";
 import type { MyContext } from "../types.js";
-import type { Movie } from "@prisma/client";
+import type { Movie, Serial } from "@prisma/client";
 
 /** Kino caption (bot ichida) — premium emojili format, janr ikonkasi doimiy 🎭 */
 export function movieCaption(m: Movie): string {
@@ -31,6 +31,46 @@ async function ensurePremiumMovieAccess(ctx: MyContext, movie: Movie): Promise<b
     `🔒 <b>"${movie.title}"</b> — <b>Premium kino</b>.\nUni ko'rish uchun premium obuna kerak.`
   );
   return false;
+}
+
+/**
+ * Premium serial uchun ruxsatni tekshiradi (ensurePremiumMovieAccess bilan bir xil
+ * mantiq). Sezon/qism ro'yxati gate qilinmaydi — faqat haqiqiy video yetkazish.
+ */
+export async function ensurePremiumSerialAccess(ctx: MyContext, serial: Serial): Promise<boolean> {
+  if (!serial.isPremium) return true;
+  const uid = ctx.from?.id;
+  if (uid && isAdmin(uid)) return true;
+
+  const user = uid ? await prisma.user.findUnique({ where: { id: BigInt(uid) } }) : null;
+  if (isPremiumActive(user?.premiumUntil)) return true;
+
+  await sendPremiumPrompt(
+    ctx,
+    `🔒 <b>"${serial.title}"</b> — <b>Premium serial</b>.\nUni ko'rish uchun premium obuna kerak.`
+  );
+  return false;
+}
+
+/**
+ * Tasodifiy kino tanlaydi. Premium bo'lmagan foydalanuvchi uchun premium
+ * kinolar tanlov hovuzidan chiqarib tashlanadi — aks holda "tasodifiy" tugma
+ * ba'zan kino o'rniga to'lov taklifiga olib kelardi.
+ */
+export async function pickRandomMovie(ctx: MyContext): Promise<Movie | null> {
+  const uid = ctx.from?.id;
+  let allowPremium = !!uid && isAdmin(uid);
+  if (!allowPremium && uid) {
+    const user = await prisma.user.findUnique({ where: { id: BigInt(uid) } });
+    allowPremium = isPremiumActive(user?.premiumUntil);
+  }
+
+  const where = allowPremium ? {} : { isPremium: false };
+  const total = await prisma.movie.count({ where });
+  if (total === 0) return null;
+  const skip = Math.floor(Math.random() * total);
+  const [movie] = await prisma.movie.findMany({ where, skip, take: 1 });
+  return movie ?? null;
 }
 
 /** Kinoni yuboradi. Premium kino bo'lib, foydalanuvchi premium bo'lmasa — yubormaydi (false). */
