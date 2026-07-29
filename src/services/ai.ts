@@ -28,8 +28,7 @@ export const PROVIDERS: Provider[] = [
     models: [
       { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (sifatli)" },
       { id: "llama-3.1-8b-instant",    label: "Llama 3.1 8B (tez, katta limit)" },
-      { id: "openai/gpt-oss-120b",     label: "GPT-OSS 120B" },
-      { id: "moonshotai/kimi-k2-instruct", label: "Kimi K2" },
+      { id: "groq/compound-mini",      label: "Compound Mini" },
     ],
   },
   {
@@ -39,10 +38,10 @@ export const PROVIDERS: Provider[] = [
     baseUrl: "https://openrouter.ai/api/v1/chat/completions",
     key: () => config.openrouterApiKey,
     models: [
-      { id: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B (free)" },
-      { id: "deepseek/deepseek-chat-v3-0324:free",    label: "DeepSeek V3 (free)" },
-      { id: "google/gemini-2.0-flash-exp:free",       label: "Gemini 2.0 Flash (free)" },
-      { id: "qwen/qwen-2.5-72b-instruct:free",        label: "Qwen 2.5 72B (free)" },
+      { id: "nvidia/nemotron-3-ultra-550b-a55b:free", label: "Nemotron 3 Ultra 550B (free)" },
+      { id: "google/gemma-4-26b-a4b-it:free",         label: "Gemma 4 26B — rasm ham (free)" },
+      { id: "nvidia/nemotron-nano-12b-v2-vl:free",    label: "Nemotron Nano 12B VL — rasm ham (free)" },
+      { id: "openrouter/free",                        label: "OpenRouter Auto (free)" },
     ],
   },
   {
@@ -86,7 +85,6 @@ export const PROVIDERS: Provider[] = [
     key: () => config.geminiApiKey,
     models: [
       { id: "gemini-2.0-flash",     label: "Gemini 2.0 Flash" },
-      { id: "gemini-1.5-flash",     label: "Gemini 1.5 Flash" },
     ],
   },
 ];
@@ -159,13 +157,21 @@ async function fetchResilient(url: string, init: RequestInit): Promise<Response>
 }
 
 // Vision-qobiliyatli modellar (ustuvorlik tartibida). Faqat kaliti bor bo'lsa ishlatiladi.
+//
+// DIQQAT: bu ro'yxatdagi modellar 2026-07-29 da jonli sinovdan o'tkazilgan —
+// haqiqiy rasm yuborilib, javob to'g'riligi tekshirilgan. Bepul model nomlari
+// tez-tez o'zgaradi (eski ro'yxatdagi hammasi 404/429 bergan va rasm orqali
+// qidiruv umuman ishlamay qolgan edi), shuning uchun o'zgartirishdan oldin
+// har bir modelni albatta sinab ko'ring.
+//
+// "Reasoning" modellari ataylab qo'shilmagan — ular javobga <think> kabi
+// izohlarni aralashtirib, TITLE:/YEAR:/INFO: formatini buzadi.
+// Groq'da 2026-07 holatiga ko'ra umuman vision modeli yo'q.
 const VISION_MODELS: { provider: ProviderId; model: string }[] = [
-  { provider: "openrouter", model: "google/gemini-2.0-flash-exp:free" },
-  { provider: "openrouter", model: "meta-llama/llama-3.2-11b-vision-instruct:free" },
-  { provider: "mistral",    model: "pixtral-12b-latest" },
-  { provider: "groq",       model: "meta-llama/llama-4-scout-17b-16e-instruct" },
+  { provider: "openrouter", model: "google/gemma-4-26b-a4b-it:free" },
+  { provider: "openrouter", model: "nvidia/nemotron-nano-12b-v2-vl:free" },
+  { provider: "openrouter", model: "openrouter/free" },
   { provider: "gemini",     model: "gemini-2.0-flash" },
-  { provider: "github",     model: "openai/gpt-4o-mini" },
 ];
 
 function parseDataUrl(dataUrl: string): { mime: string; base64: string } | null {
