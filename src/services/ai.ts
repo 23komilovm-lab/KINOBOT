@@ -62,8 +62,10 @@ export const PROVIDERS: Provider[] = [
     baseUrl: "https://models.github.ai/inference/chat/completions",
     key: () => config.githubModelsToken,
     models: [
-      { id: "openai/gpt-4o-mini",           label: "GPT-4o mini" },
-      { id: "meta/Llama-3.3-70B-Instruct",  label: "Llama 3.3 70B" },
+      { id: "openai/gpt-4.1-mini",         label: "GPT-4.1 mini — eng sifatli, rasm ham" },
+      { id: "openai/gpt-4o-mini",          label: "GPT-4o mini — rasm ham" },
+      { id: "openai/gpt-4o",               label: "GPT-4o — kuchli, limit past" },
+      { id: "meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
     ],
   },
   {
@@ -167,9 +169,16 @@ async function fetchResilient(url: string, init: RequestInit): Promise<Response>
 // "Reasoning" modellari ataylab qo'shilmagan — ular javobga <think> kabi
 // izohlarni aralashtirib, TITLE:/YEAR:/INFO: formatini buzadi.
 // Groq'da 2026-07 holatiga ko'ra umuman vision modeli yo'q.
+// Tartib SIFAT bo'yicha: kino posterini tanish og'ir vazifa, shuning uchun eng
+// kuchli model birinchi. Rasm so'rovlari kam bo'lgani uchun GitHub Models'ning
+// past kunlik limiti bu yerda muammo emas (matn oqimida esa Groq birinchi
+// turadi — u yerda hajm muhimroq).
 const VISION_MODELS: { provider: ProviderId; model: string }[] = [
+  { provider: "github",     model: "openai/gpt-4.1-mini" },
+  { provider: "github",     model: "openai/gpt-4o-mini" },
   { provider: "openrouter", model: "google/gemma-4-26b-a4b-it:free" },
   { provider: "openrouter", model: "nvidia/nemotron-nano-12b-v2-vl:free" },
+  { provider: "mistral",    model: "pixtral-12b-latest" },
   { provider: "openrouter", model: "openrouter/free" },
   { provider: "gemini",     model: "gemini-2.0-flash" },
 ];
