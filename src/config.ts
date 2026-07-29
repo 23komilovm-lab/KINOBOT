@@ -19,6 +19,12 @@ export const config = {
   movieChannelId: process.env.MOVIE_CHANNEL_ID
     ? Number(process.env.MOVIE_CHANNEL_ID)
     : null,
+  // To'lov cheklari kanali — har bir chek (screenshot + to'liq ma'lumot) shu
+  // yerga ham yuboriladi, adminga DM kelmasa ham doimiy yozuv sifatida qoladi
+  // (firibgarlik holatida foydalanuvchini topish uchun).
+  paymentChannelId: process.env.PAYMENT_CHANNEL_ID
+    ? Number(process.env.PAYMENT_CHANNEL_ID)
+    : null,
   usePremiumEmoji: (process.env.USE_PREMIUM_EMOJI ?? "true") === "true",
   // AI provayder kalitlari (ixtiyoriy — qaysi biri bo'lsa o'sha ishlaydi)
   geminiApiKey:     process.env.GEMINI_API_KEY ?? "",
