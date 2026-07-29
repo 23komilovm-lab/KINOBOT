@@ -61,3 +61,10 @@ export function formatUzDateTime(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(uz.getUTCDate())}.${p(uz.getUTCMonth() + 1)}.${uz.getUTCFullYear()} ${p(uz.getUTCHours())}:${p(uz.getUTCMinutes())}`;
 }
+
+/** Hozirgi lahzani Toshkent vaqti bo'yicha "YYYY-MM-DD" kun kaliti sifatida qaytaradi (kunlik limitlar uchun) */
+export function todayUz(): string {
+  const uz = new Date(Date.now() + UZ_OFFSET_MS);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${uz.getUTCFullYear()}-${p(uz.getUTCMonth() + 1)}-${p(uz.getUTCDate())}`;
+}

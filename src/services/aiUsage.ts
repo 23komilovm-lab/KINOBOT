@@ -1,8 +1,9 @@
 import { prisma } from "../prisma.js";
 import { setUsageSink, type ProviderId } from "./ai.js";
+import { todayUz } from "../utils/dateRange.js";
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  return todayUz(); // "YYYY-MM-DD" — Toshkent vaqti (UTC+5)
 }
 
 /** askAI muvaffaqiyatli chaqiruvidan keyin sarfni kunlik jamlaydi */

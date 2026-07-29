@@ -7,6 +7,7 @@ import { checkContentAccess, countContentRequest } from "../utils/access.js";
 import { confirmReferral } from "../utils/referral.js";
 import { sendSerialSeasons } from "./serialView.js";
 import { deliverByCode } from "./start.js";
+import { enterAiChat } from "./aiUser.js";
 import { ADMIN_MENU_BUTTONS } from "../utils/keyboard.js";
 import type { MyContext } from "../types.js";
 
@@ -106,9 +107,17 @@ searchHandler.on("message:text", async (ctx, next) => {
     const delivered = await deliverByCode(ctx, code);
     if (delivered) { await countContentRequest(ctx); return; }
 
+    ctx.session.scratch = {
+      ...(ctx.session.scratch ?? {}),
+      aiSeedQuery: `${code}-kodli kino topilmadi, menga shunga o'xshash yoki mashhur kinolarni tavsiya qiling`,
+    };
+    const aiKb = new InlineKeyboard()
+      .text("🤖 AI orqali qidirish", "search:ai").row()
+      .text("Ko'p ko'rilganlar", "popular:page:0");
     await ctx.reply(
       `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> <b>${code}</b> kodli kino topilmadi.\n\n` +
-      `Nom bilan ham qidirib ko'ring.`
+      `Nom bilan ham qidirib ko'ring, yoki AI yordamchidan so'rang:`,
+      { reply_markup: aiKb }
     );
     return;
   }
@@ -151,15 +160,14 @@ async function searchByName(ctx: MyContext, query: string) {
   ]);
 
   if (movies.length === 0 && serials.length === 0) {
-    // Natija topilmasa — inline qidiruv va popular knopkalari ko'rsatiladi
+    // Natija topilmasa — AI yordamchiga yo'naltiramiz (inline qidiruv aynan shu
+    // so'rovni qayta yuborib, kafolatlangan holda yana hech narsa topmasdi)
+    ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiSeedQuery: query };
     const kb = new InlineKeyboard()
-      .switchInlineCurrent(
-        `🔎 Inline qidiruv: ${query}`,
-        query
-      ).row()
+      .text("🤖 AI orqali qidirish", "search:ai").row()
       .text("Ko'p ko'rilganlar", "popular:page:0");
     await ctx.reply(
-      `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> "<b>${e.escapeHtml(query)}</b>" topilmadi.\n\nInline qidiruv yoki mashhur kinolarni sinab ko'ring:`,
+      `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> "<b>${e.escapeHtml(query)}</b>" topilmadi.\n\nAI yordamchidan so'rang yoki mashhur kinolarni sinab ko'ring:`,
       { reply_markup: kb }
     );
     return;
@@ -212,6 +220,13 @@ searchHandler.callbackQuery(/^search:page:(\d+)$/, async (ctx) => {
 searchHandler.callbackQuery("search:close", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.deleteMessage().catch(() => {});
+});
+
+searchHandler.callbackQuery("search:ai", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const seed = ctx.session.scratch?.aiSeedQuery as string | undefined;
+  if (ctx.session.scratch) delete ctx.session.scratch.aiSeedQuery;
+  await enterAiChat(ctx, seed);
 });
 
 // Natijadan kino

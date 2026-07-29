@@ -110,6 +110,14 @@ export const rateLimitSnapshot = new Map<ProviderId, Record<string, string>>();
 /** So'nggi xato (panel uchun) */
 export const lastProviderError = new Map<ProviderId, string>();
 
+/** So'nggi urinishlarning barchasi 429 (limit) bilan tugadimi — foydalanuvchiga aniqroq xabar berish uchun */
+export function lastFailureWasRateLimited(): boolean {
+  for (const msg of lastProviderError.values()) {
+    if (/\b429\b/.test(msg)) return true;
+  }
+  return false;
+}
+
 interface AiResult {
   text: string;
   provider: ProviderId;
@@ -124,6 +132,30 @@ export interface AiCallOpts {
   history?: ChatMsg[];
   userText: string;
   imageDataUrl?: string; // "data:image/jpeg;base64,...."
+  maxTokens?: number;    // standart 800; qisqa ichki so'rovlar (masalan kalit so'z ajratish) uchun kamaytiriladi
+}
+
+const REQUEST_TIMEOUT_MS = 12_000;
+
+async function fetchOnce(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Timeout bilan so'rov + tranzient xatoda (tarmoq, 429, 5xx) BITTA tezkor qayta urinish */
+async function fetchResilient(url: string, init: RequestInit): Promise<Response> {
+  try {
+    const res = await fetchOnce(url, init);
+    if (res.ok || (res.status !== 429 && res.status < 500)) return res;
+    return await fetchOnce(url, init);
+  } catch {
+    return await fetchOnce(url, init); // ikkinchi urinish ham otilsa — tashqi catch tutadi
+  }
 }
 
 // Vision-qobiliyatli modellar (ustuvorlik tartibida). Faqat kaliti bor bo'lsa ishlatiladi.
@@ -159,10 +191,10 @@ async function callOpenAI(p: Provider, model: string, opts: AiCallOpts): Promise
       { role: "user", content: userContent },
     ];
 
-    const res = await fetch(p.baseUrl, {
+    const res = await fetchResilient(p.baseUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key()}` },
-      body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 800 }),
+      body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: opts.maxTokens ?? 800 }),
     });
 
     const rl: Record<string, string> = {};
@@ -209,13 +241,13 @@ async function callGemini(p: Provider, model: string, opts: AiCallOpts): Promise
     contents.push({ role: "user", parts: lastParts });
 
     const url = `${p.baseUrl}/${model}:generateContent?key=${p.key()}`;
-    const res = await fetch(url, {
+    const res = await fetchResilient(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents,
         ...(opts.system ? { systemInstruction: { parts: [{ text: opts.system }] } } : {}),
-        generationConfig: { temperature: 0.7, maxOutputTokens: 800 },
+        generationConfig: { temperature: 0.7, maxOutputTokens: opts.maxTokens ?? 800 },
       }),
     });
     if (!res.ok) {

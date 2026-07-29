@@ -4,10 +4,12 @@ import { ensureSubscribed } from "./subscription.js";
 import { getBool, getSetting, KEYS } from "./settings.js";
 import { isPremiumActive, premiumEnabled, getFreeLimits } from "./premium.js";
 import { sendPremiumPrompt } from "../handlers/premiumUser.js";
+import { todayUz } from "./dateRange.js";
 import type { MyContext } from "../types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const today = () => new Date().toISOString().slice(0, 10);
+// Toshkent vaqti bo'yicha kun kaliti — UTC bo'lsa "kunlik" limit soat 05:00 (UZT) da reset bo'lardi
+const today = todayUz;
 
 /** Chegara tekshiruvi uchun kerak bo'ladigan minimal foydalanuvchi maydonlari */
 interface QuotaUser {

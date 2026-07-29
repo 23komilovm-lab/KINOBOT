@@ -3,7 +3,7 @@ import { prisma } from "../../prisma.js";
 import { adminCan } from "../../config.js";
 import { e } from "../../utils/emoji.js";
 import { ibtn, kb, aiActiveKeyboard, adminMenuKeyboard } from "../../utils/keyboard.js";
-import { aiEnabled, askAIChat, type ChatMsg } from "../../services/ai.js";
+import { aiEnabled, askAIChat, lastFailureWasRateLimited, type ChatMsg } from "../../services/ai.js";
 import { AI_CONTROLLABLE, findControllable, applyControllable, getSetting } from "../../utils/settings.js";
 import { summarizeGender } from "../../utils/gender.js";
 import { acquireBulkLock, bulkSend, formatBulkResult, releaseBulkLock } from "../../services/bulkSend.js";
@@ -280,7 +280,11 @@ aiAdminHandler.on("message:text", async (ctx, next) => {
   const answer = await askAdminAi(ctx, text);
 
   if (!answer) {
-    await ctx.reply("🤖 Kechirasiz, hozir javob bera olmadim. Birozdan keyin urinib ko'ring.");
+    await ctx.reply(
+      lastFailureWasRateLimited()
+        ? "🤖 Hozir AI juda band (limit tugadi) — 1 daqiqadan so'ng qayta urinib ko'ring 🙏"
+        : "🤖 Kechirasiz, hozir javob bera olmadim. Birozdan keyin urinib ko'ring."
+    );
     return;
   }
 

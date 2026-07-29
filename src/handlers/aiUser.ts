@@ -3,7 +3,7 @@ import { prisma } from "../prisma.js";
 import { e } from "../utils/emoji.js";
 import { ibtn, kb, userMenuKeyboard, aiActiveKeyboard } from "../utils/keyboard.js";
 import { checkContentAccess, checkAiAccess } from "../utils/access.js";
-import { aiEnabled, askAIChat, askVision, visionEnabled, type ChatMsg } from "../services/ai.js";
+import { aiEnabled, askAIChat, askVision, visionEnabled, lastFailureWasRateLimited, type ChatMsg } from "../services/ai.js";
 import { config } from "../config.js";
 import { sendMovie } from "../services/media.js";
 import { sendSerialSeasons } from "./serialView.js";
@@ -47,13 +47,40 @@ function clearHistory(ctx: MyContext) {
 type MovieCtx  = { code: number; title: string; genre: string | null; year: number | null; views: number };
 type SerialCtx = { code: number; title: string; genre: string | null; year: number | null };
 
+const KEYWORD_EXTRACT_SYSTEM =
+  `Foydalanuvchi "Kino vaqti" botiga yozgan xabardan JANR yoki KAYFIYAT/MAVZU kalit so'zlarini ajrat. ` +
+  `Javobda FAQAT vergul bilan ajratilgan 1-5 ta o'zbekcha so'z/ibora bo'lsin ` +
+  `(masalan: jangari, komediya, romantik, kosmos, urush, do'stlik, retro). ` +
+  `Aniq janr/mavzu/kayfiyat bo'lmasa (salomlashish, umumiy savol, aniq film nomi) — bo'sh qator qaytar. ` +
+  `Izoh, tirnoq, boshqa matn YOZMA.`;
+
+/**
+ * So'rovdan janr/kayfiyat kalit so'zlarini ajratadi (masalan "kosmosda qoladigan
+ * kino" → "kosmos, fantastika"). Muvaffaqiyatsiz bo'lsa bo'sh massiv qaytaradi —
+ * buildContext bunday holda oddiy so'zma-so'z qidiruv + mashhurlar bilan davom etadi.
+ */
+async function extractSearchKeywords(query: string): Promise<string[]> {
+  const raw = await askAIChat("user", { system: KEYWORD_EXTRACT_SYSTEM, userText: query, maxTokens: 60 });
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length >= 2 && s.length <= 30 && !/[[\]{}]/.test(s))
+    .slice(0, 5);
+}
+
 /**
  * Foydalanuvchi so'roviga mos + mashhur kinolar/seriallardan QISQA kontekst
  * tuzadi (butun katalog emas — Groq kunlik token limiti tez tugamasligi uchun).
+ *
+ * Ikki bosqichli qidiruv: (1) so'zma-so'z (title/genre contains) — aniq nom
+ * so'ralganda ishlaydi; (2) AI ajratgan janr/kayfiyat kalit so'zlari bo'yicha
+ * KENGROQ so'rov — "kulgili narsa", "kosmos haqida" kabi so'zma-so'z mos
+ * kelmaydigan so'rovlarda ham tegishli janrdagi kontentni topadi.
  */
 async function buildContext(query: string): Promise<string> {
   const kw = query.trim();
-  const keywordWhere = kw.length >= 2
+  const rawWhere = kw.length >= 2
     ? {
         OR: [
           { title: { contains: kw, mode: "insensitive" as const } },
@@ -62,36 +89,39 @@ async function buildContext(query: string): Promise<string> {
       }
     : undefined;
 
-  const [matchedMovies, popularMovies, matchedSerials, popularSerials] = await Promise.all([
-    keywordWhere
-      ? prisma.movie.findMany({
-          where: keywordWhere, take: 15, orderBy: { views: "desc" },
-          select: { code: true, title: true, genre: true, year: true, views: true },
-        })
+  const keywords = kw.length >= 2 ? await extractSearchKeywords(kw) : [];
+  const genreWhere = keywords.length
+    ? { OR: keywords.map((k) => ({ genre: { contains: k, mode: "insensitive" as const } })) }
+    : undefined;
+
+  const movieSelect  = { code: true, title: true, genre: true, year: true, views: true } as const;
+  const serialSelect = { code: true, title: true, genre: true, year: true } as const;
+
+  const [rawMovies, genreMovies, popularMovies, rawSerials, genreSerials, popularSerials] = await Promise.all([
+    rawWhere
+      ? prisma.movie.findMany({ where: rawWhere, take: 12, orderBy: { views: "desc" }, select: movieSelect })
       : Promise.resolve([] as MovieCtx[]),
-    prisma.movie.findMany({
-      orderBy: { views: "desc" }, take: 15,
-      select: { code: true, title: true, genre: true, year: true, views: true },
-    }),
-    keywordWhere
-      ? prisma.serial.findMany({
-          where: keywordWhere, take: 10, orderBy: { views: "desc" },
-          select: { code: true, title: true, genre: true, year: true },
-        })
+    genreWhere
+      ? prisma.movie.findMany({ where: genreWhere, take: 12, orderBy: { views: "desc" }, select: movieSelect })
+      : Promise.resolve([] as MovieCtx[]),
+    prisma.movie.findMany({ orderBy: { views: "desc" }, take: 15, select: movieSelect }),
+    rawWhere
+      ? prisma.serial.findMany({ where: rawWhere, take: 10, orderBy: { views: "desc" }, select: serialSelect })
       : Promise.resolve([] as SerialCtx[]),
-    prisma.serial.findMany({
-      orderBy: { views: "desc" }, take: 10,
-      select: { code: true, title: true, genre: true, year: true },
-    }),
+    genreWhere
+      ? prisma.serial.findMany({ where: genreWhere, take: 10, orderBy: { views: "desc" }, select: serialSelect })
+      : Promise.resolve([] as SerialCtx[]),
+    prisma.serial.findMany({ orderBy: { views: "desc" }, take: 10, select: serialSelect }),
   ]);
 
   const movieMap = new Map<number, MovieCtx>();
-  for (const m of [...matchedMovies, ...popularMovies]) movieMap.set(m.code, m);
+  for (const m of [...rawMovies, ...genreMovies, ...popularMovies]) movieMap.set(m.code, m);
   const serialMap = new Map<number, SerialCtx>();
-  for (const s of [...matchedSerials, ...popularSerials]) serialMap.set(s.code, s);
+  for (const s of [...rawSerials, ...genreSerials, ...popularSerials]) serialMap.set(s.code, s);
 
-  const movies  = [...movieMap.values()];
-  const serials = [...serialMap.values()];
+  // Token byudjetini nazorat qilamiz — jamlangan ro'yxat cheksiz o'smasin
+  const movies  = [...movieMap.values()].slice(0, 25);
+  const serials = [...serialMap.values()].slice(0, 15);
 
   const mv = movies.length
     ? movies.map((m) => `- ${m.title} (kod: m${m.code}${m.genre ? `, ${m.genre}` : ""}${m.year ? `, ${m.year}` : ""}, ${m.views}👁)`).join("\n")
@@ -159,7 +189,73 @@ function systemPrompt(context: string, userInfo: string): string {
   );
 }
 
-async function enterAiChat(ctx: MyContext): Promise<void> {
+/** Provayder zanjiri butunlay muvaffaqiyatsiz bo'lganda ko'rsatiladigan xabar — sabab bo'yicha aniqroq */
+function aiFailureMessage(): string {
+  return lastFailureWasRateLimited()
+    ? "🤖 Hozir AI juda band (limit tugadi) — 1 daqiqadan so'ng qayta urinib ko'ring 🙏"
+    : "🤖 Kechirasiz, hozir AI javob bera olmadi. Birozdan keyin qayta urinib ko'ring.";
+}
+
+/**
+ * Bitta AI muloqot navbatini bajaradi: limit tekshiruvi → kontekst → so'rov →
+ * teg parsing ([SEND]/[LIST]) → yetkazish. `message:text` handleri va
+ * qidiruvdan "seed" so'rov bilan kirish — ikkalasi ham shu funksiyani chaqiradi.
+ */
+async function runAiTurn(ctx: MyContext, text: string): Promise<void> {
+  if (!(await checkAiAccess(ctx))) return;
+
+  await ctx.replyWithChatAction("typing").catch(() => {});
+  const context = await buildContext(text);
+  const history = getHistory(ctx);
+  const answer = await askAIChat("user", {
+    system: systemPrompt(context, buildUserInfo(ctx)),
+    history,
+    userText: text,
+  });
+
+  if (!answer) {
+    await ctx.reply(aiFailureMessage());
+    return;
+  }
+
+  const listMatch = answer.match(/\[LIST:([^\]]+)\]/i);
+  const display = answer
+    .replace(/\[LIST:[^\]]+\]/gi, "")
+    .replace(/\[SEND:[ms]?\d+\]/gi, "")
+    .trim();
+
+  // Suhbat tarixiga TOZALANGAN matn qo'shiladi — protokol teglari (ilgari xom
+  // holda saqlanardi) modelga o'z boshqaruv sintaksisini qayta "o'qitmasin".
+  pushHistory(ctx, text, display || answer);
+
+  if (display) {
+    await ctx.reply(display).catch(async () => { await ctx.reply(e.escapeHtml(display)); });
+  }
+
+  if (listMatch) {
+    const rawCodes = listMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
+    const items = await resolveListItems(rawCodes);
+    if (items.length) {
+      ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiList: { items, page: 0 } };
+      await renderAiList(ctx, false);
+    }
+    return;
+  }
+
+  // [SEND:...] — prefiks bor (m/s) yoki prefikssiz (default = kino)
+  const codes: string[] = [];
+  const re = /\[SEND:\s*([ms]?)(\d+)\]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(answer)) !== null) codes.push(`${m[1] || "m"}${m[2]}`);
+
+  const unique = [...new Set(codes)].slice(0, 5);
+  for (const code of unique) {
+    await deliverPrefixedCode(ctx, code).catch(() => {});
+  }
+}
+
+/** AI suhbatiga kiradi. `seedQuery` berilsa — salomlashish o'rniga darhol shu so'rovga javob generatsiya qilinadi. */
+export async function enterAiChat(ctx: MyContext, seedQuery?: string): Promise<void> {
   if (!aiEnabled()) {
     await ctx.reply("🤖 AI yordamchi hozircha sozlanmagan. Keyinroq urinib ko'ring.");
     return;
@@ -170,6 +266,16 @@ async function enterAiChat(ctx: MyContext): Promise<void> {
 
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiChat: true };
   clearHistory(ctx); // yangi suhbat — tarix tozalanadi
+
+  if (seedQuery) {
+    await ctx.reply(
+      "🤖 <b>AI yordamchi</b> yoqildi — javob tayyorlanmoqda... 🔎",
+      { reply_markup: aiActiveKeyboard() }
+    );
+    await runAiTurn(ctx, seedQuery);
+    return;
+  }
+
   await ctx.reply(
     `🤖 <b>AI yordamchi</b> — sizga xizmatda! ✨\n\n` +
     `Menga yozing yoki <b>kino posterini/rasmini yuboring</b> — tanib beraman!\n` +
@@ -183,10 +289,10 @@ async function enterAiChat(ctx: MyContext): Promise<void> {
   );
 }
 
-aiUserHandler.hears(AI_BTN, enterAiChat);
+aiUserHandler.hears(AI_BTN, (ctx) => enterAiChat(ctx));
 
 // /ai komandasi — reply tugmasi bosilgani kabi AI suhbatiga kiradi
-aiUserHandler.command("ai", enterAiChat);
+aiUserHandler.command("ai", (ctx) => enterAiChat(ctx));
 
 // Start xabaridagi "AI yordamchi" inline tugmasi
 aiUserHandler.callbackQuery("ai:enter", async (ctx) => {
@@ -314,56 +420,7 @@ aiUserHandler.on("message:text", async (ctx, next) => {
     return next();
   }
 
-  // AI so'rovi limiti (premium funksiya) — har xabar hisoblanadi
-  if (!(await checkAiAccess(ctx))) return;
-
-  await ctx.replyWithChatAction("typing").catch(() => {});
-  const context = await buildContext(text);
-  const history = getHistory(ctx);
-  const answer = await askAIChat("user", {
-    system: systemPrompt(context, buildUserInfo(ctx)),
-    history,
-    userText: text,
-  });
-
-  if (!answer) {
-    await ctx.reply("🤖 Kechirasiz, hozir javob bera olmadim. Birozdan keyin urinib ko'ring.");
-    return;
-  }
-
-  // Suhbat tarixiga qo'shamiz (protokol teglarsiz)
-  pushHistory(ctx, text, answer);
-
-  const listMatch = answer.match(/\[LIST:([^\]]+)\]/i);
-  const display = answer
-    .replace(/\[LIST:[^\]]+\]/gi, "")
-    .replace(/\[SEND:[ms]?\d+\]/gi, "")
-    .trim();
-
-  if (display) {
-    await ctx.reply(display).catch(async () => { await ctx.reply(e.escapeHtml(display)); });
-  }
-
-  if (listMatch) {
-    const rawCodes = listMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
-    const items = await resolveListItems(rawCodes);
-    if (items.length) {
-      ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiList: { items, page: 0 } };
-      await renderAiList(ctx, false);
-    }
-    return;
-  }
-
-  // [SEND:...] — prefiks bor (m/s) yoki prefikssiz (default = kino)
-  const codes: string[] = [];
-  const re = /\[SEND:\s*([ms]?)(\d+)\]/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(answer)) !== null) codes.push(`${m[1] || "m"}${m[2]}`);
-
-  const unique = [...new Set(codes)].slice(0, 5);
-  for (const code of unique) {
-    await deliverPrefixedCode(ctx, code).catch(() => {});
-  }
+  await runAiTurn(ctx, text);
 });
 
 // ─── Rasm orqali kino topish (vision) ────────────────────────────────────────
@@ -386,8 +443,10 @@ aiUserHandler.on("message:photo", async (ctx, next) => {
   try {
     const file = await ctx.api.getFile(photo.file_id);
     const url = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
-    const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
-    dataUrl = `data:image/jpeg;base64,${buf.toString("base64")}`;
+    const fileRes = await fetch(url);
+    const buf = Buffer.from(await fileRes.arrayBuffer());
+    const mime = fileRes.headers.get("content-type") || "image/jpeg";
+    dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
   } catch {
     await ctx.reply("❌ Rasmni yuklab bo'lmadi. Qaytadan urinib ko'ring.");
     return;
@@ -413,11 +472,11 @@ aiUserHandler.on("message:photo", async (ctx, next) => {
     return;
   }
 
-  // Bazadan qidirish (nom bo'yicha)
-  const found = await prisma.movie.findFirst({
-    where: { title: { contains: title, mode: "insensitive" } },
-    orderBy: { views: "desc" },
-  });
+  // Bazadan qidirish (nom bo'yicha) — kino VA serial ikkalasi ham tekshiriladi
+  const [foundMovie, foundSerial] = await Promise.all([
+    prisma.movie.findFirst({ where: { title: { contains: title, mode: "insensitive" } }, orderBy: { views: "desc" } }),
+    prisma.serial.findFirst({ where: { title: { contains: title, mode: "insensitive" } }, orderBy: { views: "desc" } }),
+  ]);
 
   await ctx.reply(
     `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> Rasmda: <b>${e.escapeHtml(title)}</b>` +
@@ -425,11 +484,13 @@ aiUserHandler.on("message:photo", async (ctx, next) => {
     (info ? `\n<i>${e.escapeHtml(info)}</i>` : "")
   );
 
-  if (found) {
-    await sendMovie(ctx, found);
+  if (foundMovie) {
+    await sendMovie(ctx, foundMovie);
+  } else if (foundSerial) {
+    await sendSerialSeasons(ctx, foundSerial.id);
   } else {
     await ctx.reply(
-      `ℹ️ Bu kino hozircha <b>bazamizda yo'q</b>. Nomi bo'yicha qidirib ko'ring yoki keyinroq qo'shilishi mumkin.`
+      `ℹ️ Bu kino/serial hozircha <b>bazamizda yo'q</b>. Nomi bo'yicha qidirib ko'ring yoki keyinroq qo'shilishi mumkin.`
     );
   }
 });
