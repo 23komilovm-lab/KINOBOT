@@ -93,8 +93,10 @@ function broadcastMenu() {
       ibtn("🗺 Viloyat bo'yicha",        "bc:target:region",    "success"),
       ibtn("📊 Funnel javobchilari",     "bc:target:funnel",    "success"),
     ],
-    [ibtn("📋 So'rovnomalar (Funnel)",   "fn:menu",             "primary", BE.trend)],
-    [ibtn("🗂 Yuborishlar tarixi",       "bc:history:0",        "primary", BE.list)],
+    [
+      ibtn("📋 So'rovnoma",          "fn:menu",      "primary"),
+      ibtn("🗂 Yuborishlar tarixi",  "bc:history:0", "primary"),
+    ],
     [ibtn("♻️ Bloklanganlar ro'yxatini tiklash", "bc:unblock", "primary")],
     [ibtn("Menyuga qaytish", "bc:close", undefined, BE.backMenu)],
   );

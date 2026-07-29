@@ -14,9 +14,18 @@ export const bot = new Bot<MyContext>(config.botToken);
 bot.use(sequentialize((ctx) => ctx.chat?.id.toString() ?? ctx.from?.id.toString()));
 
 // Sessiya (conversations uchun shart) — PostgreSQL'da saqlanadi
+//
+// getSessionKey MUHIM: standart kalit `ctx.chat.id` ga tayanadi, lekin
+// inline_query va chosen_inline_result update'larida chat YO'Q. Natijada
+// sessiyaga murojaat qilgan har qanday middleware (masalan conversations
+// plugini) "session key is undefined" xatosi bilan yiqilardi va inline
+// so'rov umuman javobsiz qolardi — referalni do'stlarga ulashish shu
+// sababdan ishlamay turgan edi. Shaxsiy chatda chat.id === from.id, ya'ni
+// bu fallback mavjud sessiyalarni buzmaydi.
 bot.use(
   session({
     initial: (): SessionData => ({}),
+    getSessionKey: (ctx) => ctx.chat?.id.toString() ?? ctx.from?.id.toString(),
     storage: prismaSessionStorage<SessionData>(),
   })
 );

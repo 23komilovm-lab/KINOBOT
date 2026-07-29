@@ -7,6 +7,7 @@ import { aiEnabled, askAIChat, askVision, visionEnabled, lastFailureWasRateLimit
 import { config } from "../config.js";
 import { sendMovie } from "../services/media.js";
 import { sendSerialSeasons } from "./serialView.js";
+import { isPremiumActive } from "../utils/premium.js";
 import type { MyContext } from "../types.js";
 
 export const aiUserHandler = new Composer<MyContext>();
@@ -44,8 +45,36 @@ function clearHistory(ctx: MyContext) {
   if (ctx.session.scratch) delete ctx.session.scratch.aiHistory;
 }
 
-type MovieCtx  = { code: number; title: string; genre: string | null; year: number | null; views: number };
-type SerialCtx = { code: number; title: string; genre: string | null; year: number | null };
+type MovieCtx = {
+  code: number; title: string; genre: string | null; year: number | null;
+  views: number; quality: string | null; language: string | null;
+  duration: number | null; isPremium: boolean; caption: string | null;
+};
+type SerialCtx = {
+  code: number; title: string; genre: string | null; year: number | null;
+  isPremium: boolean; caption: string | null;
+};
+
+/** Kontekst uchun bitta kinoni to'liq, lekin ixcham qatorga aylantiradi */
+function movieLine(m: MovieCtx): string {
+  const bits = [
+    m.genre, m.year ? String(m.year) : null, m.quality, m.language,
+    m.duration ? `${Math.round(m.duration / 60)} daq` : null,
+    `${m.views}👁`,
+  ].filter(Boolean);
+  const desc = m.caption?.trim().replace(/\s+/g, " ").slice(0, 160);
+  return `- ${m.title} (kod: m${m.code}) [${bits.join(", ")}]` +
+    (m.isPremium ? " 💎PREMIUM" : "") +
+    (desc ? `\n    ${desc}` : "");
+}
+
+function serialLine(s: SerialCtx): string {
+  const bits = [s.genre, s.year ? String(s.year) : null].filter(Boolean);
+  const desc = s.caption?.trim().replace(/\s+/g, " ").slice(0, 160);
+  return `- ${s.title} (kod: s${s.code}) [${bits.join(", ")}] [serial]` +
+    (s.isPremium ? " 💎PREMIUM" : "") +
+    (desc ? `\n    ${desc}` : "");
+}
 
 const KEYWORD_EXTRACT_SYSTEM =
   `Foydalanuvchi "Kino vaqti" botiga yozgan xabardan JANR yoki KAYFIYAT/MAVZU kalit so'zlarini ajrat. ` +
@@ -94,54 +123,81 @@ async function buildContext(query: string): Promise<string> {
     ? { OR: keywords.map((k) => ({ genre: { contains: k, mode: "insensitive" as const } })) }
     : undefined;
 
-  const movieSelect  = { code: true, title: true, genre: true, year: true, views: true } as const;
-  const serialSelect = { code: true, title: true, genre: true, year: true } as const;
+  // So'rovda kod bo'lsa ("m12", "s7" yoki shunchaki "12") — aynan o'sha kontentni
+  // kontekstga majburan qo'shamiz, aks holda mashhurlar ro'yxatiga tushmasa AI
+  // "bunday kod yo'q" deb javob berardi.
+  const codeWhere = (() => {
+    const codes = [...kw.matchAll(/\b[ms]?(\d{1,7})\b/gi)].map((m) => Number(m[1])).slice(0, 5);
+    return codes.length ? { code: { in: codes } } : undefined;
+  })();
 
-  const [rawMovies, genreMovies, popularMovies, rawSerials, genreSerials, popularSerials] = await Promise.all([
-    rawWhere
-      ? prisma.movie.findMany({ where: rawWhere, take: 12, orderBy: { views: "desc" }, select: movieSelect })
-      : Promise.resolve([] as MovieCtx[]),
-    genreWhere
-      ? prisma.movie.findMany({ where: genreWhere, take: 12, orderBy: { views: "desc" }, select: movieSelect })
-      : Promise.resolve([] as MovieCtx[]),
-    prisma.movie.findMany({ orderBy: { views: "desc" }, take: 15, select: movieSelect }),
-    rawWhere
-      ? prisma.serial.findMany({ where: rawWhere, take: 10, orderBy: { views: "desc" }, select: serialSelect })
-      : Promise.resolve([] as SerialCtx[]),
-    genreWhere
-      ? prisma.serial.findMany({ where: genreWhere, take: 10, orderBy: { views: "desc" }, select: serialSelect })
-      : Promise.resolve([] as SerialCtx[]),
-    prisma.serial.findMany({ orderBy: { views: "desc" }, take: 10, select: serialSelect }),
-  ]);
+  const movieSelect = {
+    code: true, title: true, genre: true, year: true, views: true,
+    quality: true, language: true, duration: true, isPremium: true, caption: true,
+  } as const;
+  const serialSelect = {
+    code: true, title: true, genre: true, year: true, isPremium: true, caption: true,
+  } as const;
 
+  const [codeMovies, rawMovies, genreMovies, popularMovies, codeSerials, rawSerials, genreSerials, popularSerials] =
+    await Promise.all([
+      codeWhere
+        ? prisma.movie.findMany({ where: codeWhere, take: 5, select: movieSelect })
+        : Promise.resolve([] as MovieCtx[]),
+      rawWhere
+        ? prisma.movie.findMany({ where: rawWhere, take: 12, orderBy: { views: "desc" }, select: movieSelect })
+        : Promise.resolve([] as MovieCtx[]),
+      genreWhere
+        ? prisma.movie.findMany({ where: genreWhere, take: 12, orderBy: { views: "desc" }, select: movieSelect })
+        : Promise.resolve([] as MovieCtx[]),
+      prisma.movie.findMany({ orderBy: { views: "desc" }, take: 15, select: movieSelect }),
+      codeWhere
+        ? prisma.serial.findMany({ where: codeWhere, take: 5, select: serialSelect })
+        : Promise.resolve([] as SerialCtx[]),
+      rawWhere
+        ? prisma.serial.findMany({ where: rawWhere, take: 10, orderBy: { views: "desc" }, select: serialSelect })
+        : Promise.resolve([] as SerialCtx[]),
+      genreWhere
+        ? prisma.serial.findMany({ where: genreWhere, take: 10, orderBy: { views: "desc" }, select: serialSelect })
+        : Promise.resolve([] as SerialCtx[]),
+      prisma.serial.findMany({ orderBy: { views: "desc" }, take: 10, select: serialSelect }),
+    ]);
+
+  // Tartib MUHIM: kod bo'yicha topilganlar birinchi — pastdagi slice() ularni kesib tashlamasin
   const movieMap = new Map<number, MovieCtx>();
-  for (const m of [...rawMovies, ...genreMovies, ...popularMovies]) movieMap.set(m.code, m);
+  for (const m of [...codeMovies, ...rawMovies, ...genreMovies, ...popularMovies]) movieMap.set(m.code, m);
   const serialMap = new Map<number, SerialCtx>();
-  for (const s of [...rawSerials, ...genreSerials, ...popularSerials]) serialMap.set(s.code, s);
+  for (const s of [...codeSerials, ...rawSerials, ...genreSerials, ...popularSerials]) serialMap.set(s.code, s);
 
   // Token byudjetini nazorat qilamiz — jamlangan ro'yxat cheksiz o'smasin
   const movies  = [...movieMap.values()].slice(0, 25);
   const serials = [...serialMap.values()].slice(0, 15);
 
-  const mv = movies.length
-    ? movies.map((m) => `- ${m.title} (kod: m${m.code}${m.genre ? `, ${m.genre}` : ""}${m.year ? `, ${m.year}` : ""}, ${m.views}👁)`).join("\n")
-    : "yo'q";
-  const sr = serials.length
-    ? serials.map((s) => `- ${s.title} (kod: s${s.code}${s.genre ? `, ${s.genre}` : ""}) [serial]`).join("\n")
-    : "yo'q";
+  const mv = movies.length ? movies.map(movieLine).join("\n") : "yo'q";
+  const sr = serials.length ? serials.map(serialLine).join("\n") : "yo'q";
 
-  return `KINOLAR:\n${mv}\n\nSERIALLAR:\n${sr}\n\n(Bu — so'rovingizga mos + eng mashhur kontent. Boshqasini ` +
-    `so'rasangiz, mos kelmasa "ro'yxatda yo'q" deb ayt.)`;
+  return `KINOLAR:\n${mv}\n\nSERIALLAR:\n${sr}\n\n` +
+    `(Bu — so'rovga mos + eng mashhur kontent. Qavs ichida: janr, yil, sifat, til, ` +
+    `davomiylik, ko'rishlar. Pastdagi qator — qisqa tavsif. 💎PREMIUM belgisi bo'lsa ` +
+    `bu kino faqat premium obunachilar uchun. Ro'yxatda yo'q narsani "bor" dema.)`;
 }
 
-/** Foydalanuvchi haqida AI uchun qisqa profil matni */
-function buildUserInfo(ctx: MyContext): string {
+/** Foydalanuvchi haqida AI uchun qisqa profil matni (premium holati bilan) */
+async function buildUserInfo(ctx: MyContext): Promise<string> {
   const u = ctx.from!;
   const name     = u.first_name?.trim() || "Foydalanuvchi";
   const lastName = u.last_name?.trim();
   const fullName = lastName ? `${name} ${lastName}` : name;
   const username = u.username ? `@${u.username}` : "yo'q";
-  return `Ism: ${fullName}\nUsername: ${username}\nTelegram ID: ${u.id}`;
+
+  // Premium holati — AI 💎PREMIUM kinolarni yuborish yoki obuna taklif qilishni shunga qarab hal qiladi
+  const dbUser = await prisma.user.findUnique({
+    where: { id: BigInt(u.id) }, select: { premiumUntil: true },
+  }).catch(() => null);
+  const premium = isPremiumActive(dbUser?.premiumUntil);
+
+  return `Ism: ${fullName}\nUsername: ${username}\nTelegram ID: ${u.id}\n` +
+    `Premium obuna: ${premium ? "BOR (premium kinolarni ham ko'ra oladi)" : "YO'Q (premium kinolarni ko'ra olmaydi)"}`;
 }
 
 function systemPrompt(context: string, userInfo: string): string {
@@ -179,6 +235,22 @@ function systemPrompt(context: string, userInfo: string): string {
     `• Bitta javobda HAM [SEND] HAM [LIST] ishlatma — vaziyatga qarab FAQAT bittasini tanla.\n` +
     `• Faqat yuqoridagi ro'yxatdagi mavjud kodlardan foydalan. Ro'yxatda yo'q bo'lsa — rostini ayt.\n\n` +
 
+    `━━━ KINO HAQIDA MA'LUMOT ━━━\n` +
+    `• Foydalanuvchi kino nomini yoki kodini yozsa (masalan "12" yoki "Titanic haqida aytib ber"), ` +
+    `ro'yxatdagi MA'LUMOTLARDAN foydalanib chiroyli, to'liq javob ber: nomi, janri, yili, sifati, ` +
+    `tili, davomiyligi, qisqa syujeti, ko'rishlar soni.\n` +
+    `• Ma'lumotni quruq ro'yxat qilib emas, jonli va qiziqarli qilib yoz — odamda ko'rish istagi uyg'onsin.\n` +
+    `• Keyin "Ko'rmoqchimisiz?" deb so'ra yoki darhol [SEND:...] bilan yubor (foydalanuvchi so'ragan bo'lsa).\n\n` +
+
+    `━━━ 💎 PREMIUM KINOLAR ━━━\n` +
+    `• Ro'yxatda 💎PREMIUM belgisi bor kinoni oddiy foydalanuvchi KO'RA OLMAYDI.\n` +
+    `• Bunday kino so'ralsa: [SEND:...] ISHLATMA. Buning o'rniga kino haqida ` +
+    `ishtiyoq uyg'otadigan, chiroyli tavsif yoz (nima uchun ajoyib, qanday janr, nimasi qiziq) — ` +
+    `keyin samimiy tarzda premium obunani taklif qil: obuna bo'lsa shu kinoni va yana minglab ` +
+    `kinolarni cheksiz, majburiy obunasiz ko'ra olishini ayt.\n` +
+    `• Taklifni bosim o'tkazmasdan, do'stona va ishonarli qil. Oxirida <b>/premium</b> buyrug'ini eslat.\n` +
+    `• Agar odamda premium bo'lsa — u baribir ko'ra oladi, shuning uchun oddiygina [SEND:...] bilan yubor.\n\n` +
+
     `━━━ BOT MA'LUMOTLARI ━━━\n` +
     `• Admin bilan bog'lanish: ${ADMIN_CONTACT}\n` +
     `• Rasmiy kanal: ${CHANNEL}\n` +
@@ -205,10 +277,10 @@ async function runAiTurn(ctx: MyContext, text: string): Promise<void> {
   if (!(await checkAiAccess(ctx))) return;
 
   await ctx.replyWithChatAction("typing").catch(() => {});
-  const context = await buildContext(text);
+  const [context, userInfo] = await Promise.all([buildContext(text), buildUserInfo(ctx)]);
   const history = getHistory(ctx);
   const answer = await askAIChat("user", {
-    system: systemPrompt(context, buildUserInfo(ctx)),
+    system: systemPrompt(context, userInfo),
     history,
     userText: text,
   });
@@ -424,11 +496,12 @@ aiUserHandler.on("message:text", async (ctx, next) => {
 });
 
 // ─── Rasm orqali kino topish (vision) ────────────────────────────────────────
-aiUserHandler.on("message:photo", async (ctx, next) => {
-  if (!ctx.session.scratch?.aiChat) return next();
-
+// Rasm AI rejimida ham, undan TASHQARIDA ham ishlaydi: foydalanuvchi botga
+// poster tashlasa, uni tanishini kutadi — ilgari AI rejimiga kirmagan bo'lsa
+// bot umuman javob bermay, jim qolardi.
+async function handlePhotoSearch(ctx: MyContext): Promise<void> {
   if (!visionEnabled()) {
-    await ctx.reply("🖼 Kechirasiz, rasm orqali qidirish uchun vision-AI sozlanmagan (OpenRouter/Mistral kaliti kerak).");
+    await ctx.reply("🖼 Kechirasiz, rasm orqali qidirish uchun vision-AI sozlanmagan.");
     return;
   }
 
@@ -438,7 +511,7 @@ aiUserHandler.on("message:photo", async (ctx, next) => {
   await ctx.replyWithChatAction("typing").catch(() => {});
 
   // Rasmni yuklab olish → data URL
-  const photo = ctx.message.photo.at(-1)!;
+  const photo = ctx.message!.photo!.at(-1)!;
   let dataUrl: string | null = null;
   try {
     const file = await ctx.api.getFile(photo.file_id);
@@ -493,6 +566,14 @@ aiUserHandler.on("message:photo", async (ctx, next) => {
       `ℹ️ Bu kino/serial hozircha <b>bazamizda yo'q</b>. Nomi bo'yicha qidirib ko'ring yoki keyinroq qo'shilishi mumkin.`
     );
   }
+}
+
+aiUserHandler.on("message:photo", async (ctx, next) => {
+  // To'lov cheki kutilayotgan bo'lsa — bu rasm premium oqimiga tegishli, aralashmaymiz
+  if (ctx.session.scratch?.premBuyTariff) return next();
+  // Admin broadcast qoralamasi tayyorlayotgan bo'lsa ham tegmaymiz
+  if (ctx.session.scratch?.bcast) return next();
+  await handlePhotoSearch(ctx);
 });
 
 // ─── AI ro'yxat knopkalari ────────────────────────────────────────────────────

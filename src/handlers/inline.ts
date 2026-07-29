@@ -3,7 +3,7 @@ import type { InlineQueryResult } from "grammy/types";
 import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { movieCaption } from "../services/media.js";
-import { getGlobalButton, getBool, KEYS } from "../utils/settings.js";
+import { getGlobalButton, getBool, getSetting, KEYS } from "../utils/settings.js";
 import { contentButtonRow } from "../utils/contentButton.js";
 import { getUnsubscribedChannels } from "../utils/subscription.js";
 import { countContentRequest, isFreeQuotaExhausted } from "../utils/access.js";
@@ -26,22 +26,36 @@ inlineHandler.on("inline_query", async (ctx) => {
     const link = `https://t.me/${ctx.me.username}?start=ref_${refId}`;
     const inviter = await prisma.user.findUnique({ where: { id: BigInt(refId) } });
     const inviterName = inviter?.firstName?.trim() || "Do'stingiz";
+    const photoFileId = await getSetting(KEYS.referralPhotoFileId, "");
 
+    const caption =
+      `🎬 <b>${e.escapeHtml(inviterName)}</b> sizni <b>Kino vaqti</b> botiga taklif qilmoqda!\n\n` +
+      `Minglab kino va serial — bepul va tez. 🍿`;
+    const markup = { inline_keyboard: [[{ text: "🎬 Botni ochish", url: link }]] };
+
+    // Admin taklif rasmini o'rnatgan bo'lsa — rasmli natija (ko'proq e'tibor
+    // tortadi), aks holda oddiy matnli natija.
     await ctx.answerInlineQuery(
       [
-        {
-          type: "article",
-          id: `ref${refId}`,
-          title: "🎬 Kino vaqti botiga taklif",
-          description: `${inviterName} sizni taklif qilmoqda — minglab kino va serial, bepul!`,
-          input_message_content: {
-            message_text:
-              `🎬 <b>${e.escapeHtml(inviterName)}</b> sizni <b>Kino vaqti</b> botiga taklif qilmoqda!\n\n` +
-              `Minglab kino va serial — bepul va tez. 🍿`,
-            parse_mode: "HTML",
-          },
-          reply_markup: { inline_keyboard: [[{ text: "🎬 Botni ochish", url: link }]] },
-        },
+        photoFileId
+          ? {
+              type: "photo" as const,
+              id: `refp${refId}`,
+              photo_file_id: photoFileId,
+              title: "🎬 Kino vaqti botiga taklif",
+              description: `${inviterName} sizni taklif qilmoqda — minglab kino va serial!`,
+              caption,
+              parse_mode: "HTML" as const,
+              reply_markup: markup,
+            }
+          : {
+              type: "article" as const,
+              id: `ref${refId}`,
+              title: "🎬 Kino vaqti botiga taklif",
+              description: `${inviterName} sizni taklif qilmoqda — minglab kino va serial, bepul!`,
+              input_message_content: { message_text: caption, parse_mode: "HTML" as const },
+              reply_markup: markup,
+            },
       ],
       { cache_time: 0, is_personal: true }
     );

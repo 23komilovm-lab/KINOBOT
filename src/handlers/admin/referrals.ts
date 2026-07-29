@@ -3,7 +3,7 @@ import { isOwner, adminCan } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
-import { setSetting, KEYS } from "../../utils/settings.js";
+import { getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { getReferralReward } from "../../utils/referral.js";
 import type { MyContext } from "../../types.js";
 
@@ -66,7 +66,11 @@ async function renderTop(ctx: MyContext, page: number, edit: boolean) {
     ? `🎁 Mukofot: har <b>${reward.count}</b> ta referal = <b>${reward.days} kun</b> premium`
     : `🎁 Mukofot: <b>o'chirilgan</b>`;
 
-  rows.splice(rows.length - 1, 0, [ibtn("🎁 Mukofotni sozlash", "ref:reward", "success")]);
+  const photoSet = !!(await getSetting(KEYS.referralPhotoFileId, ""));
+  rows.splice(rows.length - 1, 0,
+    [ibtn("🎁 Mukofotni sozlash", "ref:reward", "success")],
+    [ibtn(photoSet ? "🖼 Taklif rasmi: o'rnatilgan" : "🖼 Taklif rasmini o'rnatish", "ref:photo", "primary")],
+  );
 
   const text =
     `<tg-emoji emoji-id="${BE.users}">👥</tg-emoji> <b>Referal bo'lim</b>\n\n` +
@@ -92,8 +96,60 @@ referralsHandler.callbackQuery("ref:reward", async (ctx) => {
       : `<b>o'chirilgan</b>`}\n\n` +
     `Yangi qiymatni <code>referal kun</code> ko'rinishida yuboring.\n` +
     `Masalan: <code>5 7</code> — har 5 ta do'st uchun 7 kun premium.\n\n` +
-    `O'chirish uchun: <code>0 0</code>`
+    `O'chirish uchun: <code>0 0</code>`,
+    { reply_markup: kb([ibtn("❌ Bekor qilish", "ref:reward:cancel", "danger")]) }
   );
+});
+
+// ─── Taklif rasmi (inline ulashishda ko'rinadi) ──────────────────────────────
+
+referralsHandler.callbackQuery("ref:photo", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const cur = await getSetting(KEYS.referralPhotoFileId, "");
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), refPhotoEdit: true };
+
+  const rows = [[ibtn("❌ Bekor qilish", "ref:photo:cancel", "danger")]];
+  if (cur) rows.unshift([ibtn("🗑 Rasmni o'chirish", "ref:photo:clear", "danger")]);
+
+  await ctx.reply(
+    `🖼 <b>Taklif rasmi</b>\n\n` +
+    `Hozirgi holat: <b>${cur ? "o'rnatilgan" : "yo'q"}</b>\n\n` +
+    `Foydalanuvchi referal havolasini do'stlariga ulashganda shu rasm ko'rinadi.\n` +
+    `Yangi rasmni shu yerga <b>yuboring</b> (rasm sifatida, fayl emas).\n\n` +
+    `<i>Tavsiya: 1280×720 yoki kvadrat, matn yirik va o'qilarli bo'lsin.</i>`,
+    { reply_markup: kb(...rows) }
+  );
+});
+
+referralsHandler.callbackQuery("ref:photo:cancel", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "Bekor qilindi." });
+  if (ctx.session.scratch) delete ctx.session.scratch.refPhotoEdit;
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+});
+
+referralsHandler.callbackQuery("ref:photo:clear", async (ctx) => {
+  await setSetting(KEYS.referralPhotoFileId, "");
+  if (ctx.session.scratch) delete ctx.session.scratch.refPhotoEdit;
+  await ctx.answerCallbackQuery({ text: "🗑 Rasm o'chirildi.", show_alert: true });
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+});
+
+referralsHandler.on("message:photo", async (ctx, next) => {
+  if (!adminCan(ctx.from?.id ?? 0, "referrals")) return next();
+  if (!ctx.session.scratch?.refPhotoEdit) return next();
+  delete ctx.session.scratch.refPhotoEdit;
+
+  const fileId = ctx.message.photo.at(-1)?.file_id;
+  if (!fileId) { await ctx.reply("❌ Rasm o'qib bo'lmadi."); return; }
+  await setSetting(KEYS.referralPhotoFileId, fileId);
+  await ctx.reply("✅ Taklif rasmi saqlandi. Endi referal ulashilganda shu rasm ko'rinadi.");
+});
+
+referralsHandler.callbackQuery("ref:reward:cancel", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "Bekor qilindi." });
+  if (ctx.session.scratch) delete ctx.session.scratch.refRewardEdit;
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  await ctx.reply("❌ Mukofot sozlash bekor qilindi.");
 });
 
 referralsHandler.callbackQuery("noop:ref", (ctx) => ctx.answerCallbackQuery());
