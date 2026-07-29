@@ -1,5 +1,5 @@
 import { Composer } from "grammy";
-import { isOwner, adminCan } from "../../config.js";
+import { adminCan, config } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
@@ -142,7 +142,34 @@ referralsHandler.on("message:photo", async (ctx, next) => {
   const fileId = ctx.message.photo.at(-1)?.file_id;
   if (!fileId) { await ctx.reply("❌ Rasm o'qib bo'lmadi."); return; }
   await setSetting(KEYS.referralPhotoFileId, fileId);
-  await ctx.reply("✅ Taklif rasmi saqlandi. Endi referal ulashilganda shu rasm ko'rinadi.");
+
+  // Telegram matn yonida kichik rasm ko'rsatishi uchun rasm OCHIQ havolada
+  // turishi shart. Shuning uchun uni ommaviy kino kanaliga bir marta post
+  // qilamiz va o'sha postning havolasini saqlaymiz.
+  let url = "";
+  if (config.movieChannelId) {
+    const chat = await ctx.api.getChat(config.movieChannelId).catch(() => null);
+    const uname = chat && "username" in chat ? chat.username : undefined;
+    if (uname) {
+      const sent = await ctx.api.sendPhoto(config.movieChannelId, fileId, {
+        caption: "🎬 <b>Kino vaqti</b> — do'stlaringizni taklif qiling!",
+        parse_mode: "HTML",
+      }).catch(() => null);
+      if (sent) url = `https://t.me/${uname}/${sent.message_id}`;
+    }
+  }
+  await setSetting(KEYS.referralPhotoUrl, url);
+
+  await ctx.reply(
+    url
+      ? `✅ <b>Taklif rasmi saqlandi!</b>\n\n` +
+        `Endi referal ulashilganda matn yonida <b>kichik rasm</b> ko'rinadi.\n\n` +
+        `<i>Eslatma: rasm ochiq havolada turishi shart bo'lgani uchun u kino kanalingizga ` +
+        `post qilindi — o'chirmang, aks holda rasm ko'rinmay qoladi.</i>`
+      : `⚠️ Rasm saqlandi, lekin <b>ochiq havola yasab bo'lmadi</b> ` +
+        `(kino kanali ommaviy emas yoki bot u yerda admin emas).\n\n` +
+        `Shu sababli referal ulashilganda rasm ko'rinmaydi — faqat matn boradi.`
+  );
 });
 
 referralsHandler.callbackQuery("ref:reward:cancel", async (ctx) => {

@@ -26,36 +26,32 @@ inlineHandler.on("inline_query", async (ctx) => {
     const link = `https://t.me/${ctx.me.username}?start=ref_${refId}`;
     const inviter = await prisma.user.findUnique({ where: { id: BigInt(refId) } });
     const inviterName = inviter?.firstName?.trim() || "Do'stingiz";
-    const photoFileId = await getSetting(KEYS.referralPhotoFileId, "");
+    const photoUrl = await getSetting(KEYS.referralPhotoUrl, "");
 
     const caption =
       `🎬 <b>${e.escapeHtml(inviterName)}</b> sizni <b>Kino vaqti</b> botiga taklif qilmoqda!\n\n` +
       `Minglab kino va serial — bepul va tez. 🍿`;
-    const markup = { inline_keyboard: [[{ text: "🎬 Botni ochish", url: link }]] };
 
-    // Admin taklif rasmini o'rnatgan bo'lsa — rasmli natija (ko'proq e'tibor
-    // tortadi), aks holda oddiy matnli natija.
+    // Taklif rasmi o'rnatilgan bo'lsa — matn yonida KICHIK rasm ko'rinadi
+    // (Telegram link-preview uslubi). Rasm ochiq havolada bo'lishi shart,
+    // shuning uchun admin panelda u kino kanaliga post qilinib, havolasi
+    // saqlanadi. Havola bo'lmasa — oddiy matn, preview o'chirilgan holda.
     await ctx.answerInlineQuery(
       [
-        photoFileId
-          ? {
-              type: "photo" as const,
-              id: `refp${refId}`,
-              photo_file_id: photoFileId,
-              title: "🎬 Kino vaqti botiga taklif",
-              description: `${inviterName} sizni taklif qilmoqda — minglab kino va serial!`,
-              caption,
-              parse_mode: "HTML" as const,
-              reply_markup: markup,
-            }
-          : {
-              type: "article" as const,
-              id: `ref${refId}`,
-              title: "🎬 Kino vaqti botiga taklif",
-              description: `${inviterName} sizni taklif qilmoqda — minglab kino va serial, bepul!`,
-              input_message_content: { message_text: caption, parse_mode: "HTML" as const },
-              reply_markup: markup,
-            },
+        {
+          type: "article" as const,
+          id: `ref${refId}`,
+          title: "🎬 Kino vaqti botiga taklif",
+          description: `${inviterName} sizni taklif qilmoqda — minglab kino va serial, bepul!`,
+          input_message_content: {
+            message_text: caption,
+            parse_mode: "HTML" as const,
+            link_preview_options: photoUrl
+              ? { url: photoUrl, prefer_small_media: true, show_above_text: false }
+              : { is_disabled: true },
+          },
+          reply_markup: { inline_keyboard: [[{ text: "🎬 Botni ochish", url: link }]] },
+        },
       ],
       { cache_time: 0, is_personal: true }
     );
