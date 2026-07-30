@@ -6,7 +6,7 @@ import { contactAdminBtn, contactAdminKb, ibtn, kb, BE } from "../utils/keyboard
 import { getSetting, KEYS } from "../utils/settings.js";
 import { activeTariffs, grantPremium, isPremiumActive, premiumEnabled, seedDefaultTariffs } from "../utils/premium.js";
 import { getUnsubscribedChannels, editSubscriptionPrompt } from "../utils/subscription.js";
-import { formatUzDateTime } from "../utils/dateRange.js";
+import { buildPaymentNotify, pendingMarkup, serializeRefs } from "../utils/paymentNotify.js";
 import type { MyContext } from "../types.js";
 
 export const premiumHandler = new Composer<MyContext>();
@@ -284,40 +284,35 @@ premiumHandler.on(["message:photo", "message:document"], async (ctx, next) => {
     `Odatda bu bir necha daqiqa/soat ichida bo'ladi.`
   );
 
-  // Adminlarga (owner) xabar — to'g'ridan-to'g'ri Tasdiqlash/Rad etish tugmalari bilan.
-  // Firibgarlik holatida foydalanuvchini topish uchun to'liq ma'lumot bilan —
-  // ro'yxatdan o'tgan sana ham qo'shiladi (yangi hisob + darhol to'lov — shubhali belgi).
-  const uname = ctx.from!.username ? `@${ctx.from!.username}` : "—";
-  const dbUser = await prisma.user.findUnique({
-    where: { id: BigInt(ctx.from!.id) },
-    select: { createdAt: true, region: true },
-  });
-  const notify =
-    `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Yangi premium to'lov!</b>\n\n` +
-    `To'lov ID: <code>#${payment.id}</code>\n` +
-    `Foydalanuvchi: <b>${e.escapeHtml(ctx.from!.first_name ?? "—")}</b> ${uname}\n` +
-    `Telegram ID: <code>${ctx.from!.id}</code>\n` +
-    (dbUser?.region ? `Viloyat: <b>${e.escapeHtml(dbUser.region)}</b>\n` : "") +
-    (dbUser?.createdAt ? `Botda ro'yxatdan o'tgan: <b>${formatUzDateTime(dbUser.createdAt)}</b>\n` : "") +
-    `Usul: <b>${METHOD_LABEL[method]}</b>\n` +
-    `Tarif: <b>${e.escapeHtml(tariff.label)}</b> — ${tariff.price.toLocaleString("ru-RU")} so'm (${tariff.days} kun)\n` +
-    `To'lov vaqti: <b>${formatUzDateTime(payment.createdAt)}</b>`;
-  const notifyMarkup = kb([
-    ibtn("✅ Tasdiqlash", `prm:approve:${payment.id}`, "success"),
-    ibtn("❌ Rad etish", `prm:reject:${payment.id}`, "danger"),
-  ]);
+  // Adminlarga (owner) + audit kanaliga xabar, Tasdiqlash/Rad etish tugmalari bilan.
+  // Yuborilgan xabarlarning manzillari Payment.notifyRefs ga saqlanadi — tasdiqlangach
+  // HAMMA nusxa yangilanadi (ilgari kanaldagi nusxa "kutilmoqda" bo'lib qolardi).
+  const notify = await buildPaymentNotify(payment);
+  const notifyMarkup = pendingMarkup(payment.id);
 
   const notifyChatIds = [...config.ownerIds.map((o) => Number(o))];
   if (config.paymentChannelId) notifyChatIds.push(config.paymentChannelId);
 
+  const refs: { c: number; m: number }[] = [];
   for (const chatId of notifyChatIds) {
-    await ctx.api.sendMessage(chatId, notify, { parse_mode: "HTML", reply_markup: notifyMarkup }).catch((err) => {
-      console.error(`🛑 To'lov bildirishnomasi yetmadi (${chatId}):`, (err as Error).message);
-    });
+    const sent = await ctx.api
+      .sendMessage(chatId, notify, { parse_mode: "HTML", reply_markup: notifyMarkup })
+      .catch((err) => {
+        console.error(`🛑 To'lov bildirishnomasi yetmadi (${chatId}):`, (err as Error).message);
+        return null;
+      });
+    if (sent) refs.push({ c: chatId, m: sent.message_id });
+
     if (proofFileId && ctx.message.photo) {
       await ctx.api.sendPhoto(chatId, proofFileId, { caption: `Chek — to'lov #${payment.id}` }).catch(() => null);
     } else if (proofFileId && ctx.message.document) {
       await ctx.api.sendDocument(chatId, proofFileId, { caption: `Chek — to'lov #${payment.id}` }).catch(() => null);
     }
+  }
+
+  if (refs.length) {
+    await prisma.payment
+      .update({ where: { id: payment.id }, data: { notifyRefs: serializeRefs(refs) } })
+      .catch(() => null);
   }
 });

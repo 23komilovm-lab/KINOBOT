@@ -62,6 +62,10 @@ model Payment {
   method       String    @default("karta") // karta | ton | stars
   status       String    @default("pending") // pending | approved | rejected
   proofFileId  String?   // chek/screenshot file_id
+  // Bildirishnoma yuborilgan joylar (ownerlar + audit kanali) — JSON:
+  // [{"c":chatId,"m":messageId}]. Tasdiqlash/rad etishda HAMMASI yangilanadi,
+  // aks holda kanaldagi nusxa "kutilmoqda" holatida qolib ketardi.
+  notifyRefs   String?
   createdAt    DateTime  @default(now())
   reviewedById BigInt?
   reviewedAt   DateTime?

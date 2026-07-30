@@ -5,6 +5,7 @@ import { e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, contactAdminKb, ibtn, kb, BE } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { grantPremium, seedDefaultTariffs, resetToDefaultTariffs } from "../../utils/premium.js";
+import { refreshPaymentNotifications, userLink, METHOD_LABEL } from "../../utils/paymentNotify.js";
 import type { MyContext } from "../../types.js";
 
 export const premiumAdminHandler = new Composer<MyContext>();
@@ -296,10 +297,10 @@ premiumAdminHandler.callbackQuery(/^prm:pay:(\d+)$/, async (ctx) => {
   const u = await prisma.user.findUnique({ where: { id: p.userId } });
   const uname = u?.username ? `@${u.username}` : "—";
 
-  const methodText = { karta: "💳 Karta", ton: "💎 TON", stars: "⭐ Stars" }[p.method] ?? p.method;
+  const methodText = METHOD_LABEL[p.method] ?? p.method;
   const text =
     `💳 <b>To'lov #${p.id}</b>\n\n` +
-    `Foydalanuvchi: <b>${e.escapeHtml(u?.firstName ?? "—")}</b> ${uname}\n` +
+    `Foydalanuvchi: <b>${userLink(p.userId, u?.firstName, u?.username)}</b> ${uname}\n` +
     `ID: <code>${p.userId}</code>\n` +
     `Usul: <b>${methodText}</b>\n` +
     `Tarif: <b>${e.escapeHtml(p.tariffLabel)}</b> — ${p.amount.toLocaleString("ru-RU")} so'm (${p.days} kun)\n` +
@@ -327,12 +328,14 @@ premiumAdminHandler.callbackQuery(/^prm:approve:(\d+)$/, async (ctx) => {
   if (!p || p.status !== "pending") { await ctx.answerCallbackQuery({ text: "Allaqachon ko'rib chiqilgan.", show_alert: true }); return; }
 
   const until = await grantPremium(p.userId, p.days);
-  await prisma.payment.update({
+  const updated = await prisma.payment.update({
     where: { id: p.id },
     data: { status: "approved", reviewedById: BigInt(ctx.from.id), reviewedAt: new Date() },
   });
   await ctx.answerCallbackQuery({ text: "✅ Tasdiqlandi, premium yoqildi.", show_alert: true });
-  await ctx.editMessageReplyMarkup({ reply_markup: kb([ibtn("Orqaga", "prm:pending:0", undefined, BE.backMenu)]) }).catch(() => {});
+  // Barcha nusxalar (ownerlar DM + audit kanali) yakuniy holatga o'tadi
+  await refreshPaymentNotifications(ctx.api, updated);
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
 
   await ctx.api.sendMessage(
     Number(p.userId),
@@ -347,12 +350,13 @@ premiumAdminHandler.callbackQuery(/^prm:approve:(\d+)$/, async (ctx) => {
 premiumAdminHandler.callbackQuery(/^prm:reject:(\d+)$/, async (ctx) => {
   const p = await prisma.payment.findUnique({ where: { id: Number(ctx.match[1]) } });
   if (!p || p.status !== "pending") { await ctx.answerCallbackQuery({ text: "Allaqachon ko'rib chiqilgan.", show_alert: true }); return; }
-  await prisma.payment.update({
+  const updated = await prisma.payment.update({
     where: { id: p.id },
     data: { status: "rejected", reviewedById: BigInt(ctx.from.id), reviewedAt: new Date() },
   });
   await ctx.answerCallbackQuery({ text: "❌ Rad etildi.", show_alert: true });
-  await ctx.editMessageReplyMarkup({ reply_markup: kb([ibtn("Orqaga", "prm:pending:0", undefined, BE.backMenu)]) }).catch(() => {});
+  await refreshPaymentNotifications(ctx.api, updated);
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
   await ctx.api.sendMessage(
     Number(p.userId),
     `❌ To'lovingiz (#${p.id}) tasdiqlanmadi. Savol bo'lsa admin bilan bog'laning.`,
