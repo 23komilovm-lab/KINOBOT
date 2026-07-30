@@ -1,5 +1,5 @@
 import { Composer } from "grammy";
-import { adminCan, config } from "../../config.js";
+import { adminCan } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
@@ -66,10 +66,9 @@ async function renderTop(ctx: MyContext, page: number, edit: boolean) {
     ? `🎁 Mukofot: har <b>${reward.count}</b> ta referal = <b>${reward.days} kun</b> premium`
     : `🎁 Mukofot: <b>o'chirilgan</b>`;
 
-  const photoSet = !!(await getSetting(KEYS.referralPhotoFileId, ""));
   rows.splice(rows.length - 1, 0,
     [ibtn("🎁 Mukofotni sozlash", "ref:reward", "success")],
-    [ibtn(photoSet ? "🖼 Taklif rasmi: o'rnatilgan" : "🖼 Taklif rasmini o'rnatish", "ref:photo", "primary")],
+    [ibtn("🖼 Taklif rasmi haqida", "ref:photo", "primary")],
   );
 
   const text =
@@ -101,74 +100,24 @@ referralsHandler.callbackQuery("ref:reward", async (ctx) => {
   );
 });
 
-// ─── Taklif rasmi (inline ulashishda ko'rinadi) ──────────────────────────────
-
+// ─── Taklif rasmi haqida ma'lumot ────────────────────────────────────────────
+// Rasm alohida yuklanmaydi: Telegram matn yonida kichik rasm ko'rsatishi uchun
+// u OCHIQ havolada turishi shart. Bot havolasining o'zi shunday havola —
+// Telegram uning uchun preview yasaganda bot AVATARINI ko'rsatadi. Shuning
+// uchun "taklif rasmi" = bot avatari, uni @BotFather orqali almashtiriladi.
 referralsHandler.callbackQuery("ref:photo", async (ctx) => {
   await ctx.answerCallbackQuery();
-  const cur = await getSetting(KEYS.referralPhotoFileId, "");
-  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), refPhotoEdit: true };
-
-  const rows = [[ibtn("❌ Bekor qilish", "ref:photo:cancel", "danger")]];
-  if (cur) rows.unshift([ibtn("🗑 Rasmni o'chirish", "ref:photo:clear", "danger")]);
-
   await ctx.reply(
     `🖼 <b>Taklif rasmi</b>\n\n` +
-    `Hozirgi holat: <b>${cur ? "o'rnatilgan" : "yo'q"}</b>\n\n` +
-    `Foydalanuvchi referal havolasini do'stlariga ulashganda shu rasm ko'rinadi.\n` +
-    `Yangi rasmni shu yerga <b>yuboring</b> (rasm sifatida, fayl emas).\n\n` +
-    `<i>Tavsiya: 1280×720 yoki kvadrat, matn yirik va o'qilarli bo'lsin.</i>`,
-    { reply_markup: kb(...rows) }
-  );
-});
-
-referralsHandler.callbackQuery("ref:photo:cancel", async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Bekor qilindi." });
-  if (ctx.session.scratch) delete ctx.session.scratch.refPhotoEdit;
-  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
-});
-
-referralsHandler.callbackQuery("ref:photo:clear", async (ctx) => {
-  await setSetting(KEYS.referralPhotoFileId, "");
-  if (ctx.session.scratch) delete ctx.session.scratch.refPhotoEdit;
-  await ctx.answerCallbackQuery({ text: "🗑 Rasm o'chirildi.", show_alert: true });
-  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
-});
-
-referralsHandler.on("message:photo", async (ctx, next) => {
-  if (!adminCan(ctx.from?.id ?? 0, "referrals")) return next();
-  if (!ctx.session.scratch?.refPhotoEdit) return next();
-  delete ctx.session.scratch.refPhotoEdit;
-
-  const fileId = ctx.message.photo.at(-1)?.file_id;
-  if (!fileId) { await ctx.reply("❌ Rasm o'qib bo'lmadi."); return; }
-  await setSetting(KEYS.referralPhotoFileId, fileId);
-
-  // Telegram matn yonida kichik rasm ko'rsatishi uchun rasm OCHIQ havolada
-  // turishi shart. Shuning uchun uni ommaviy kino kanaliga bir marta post
-  // qilamiz va o'sha postning havolasini saqlaymiz.
-  let url = "";
-  if (config.movieChannelId) {
-    const chat = await ctx.api.getChat(config.movieChannelId).catch(() => null);
-    const uname = chat && "username" in chat ? chat.username : undefined;
-    if (uname) {
-      const sent = await ctx.api.sendPhoto(config.movieChannelId, fileId, {
-        caption: "🎬 <b>Kino vaqti</b> — do'stlaringizni taklif qiling!",
-        parse_mode: "HTML",
-      }).catch(() => null);
-      if (sent) url = `https://t.me/${uname}/${sent.message_id}`;
-    }
-  }
-  await setSetting(KEYS.referralPhotoUrl, url);
-
-  await ctx.reply(
-    url
-      ? `✅ <b>Taklif rasmi saqlandi!</b>\n\n` +
-        `Endi referal ulashilganda matn yonida <b>kichik rasm</b> ko'rinadi.\n\n` +
-        `<i>Eslatma: rasm ochiq havolada turishi shart bo'lgani uchun u kino kanalingizga ` +
-        `post qilindi — o'chirmang, aks holda rasm ko'rinmay qoladi.</i>`
-      : `⚠️ Rasm saqlandi, lekin <b>ochiq havola yasab bo'lmadi</b> ` +
-        `(kino kanali ommaviy emas yoki bot u yerda admin emas).\n\n` +
-        `Shu sababli referal ulashilganda rasm ko'rinmaydi — faqat matn boradi.`
+    `Foydalanuvchi referal havolasini do'stlariga ulashganda, matn yonida ` +
+    `<b>botning avatari</b> kichik rasm bo'lib ko'rinadi.\n\n` +
+    `Rasmni almashtirish uchun:\n` +
+    `1. @BotFather ga kiring\n` +
+    `2. <code>/setuserpic</code> buyrug'ini yuboring\n` +
+    `3. <b>@${ctx.me.username}</b> botini tanlang\n` +
+    `4. Yangi rasmni yuboring\n\n` +
+    `<i>Tavsiya: kvadrat rasm (masalan 640×640), yozuv yirik va o'qilarli bo'lsin — ` +
+    `u kichik ko'rinadi.</i>`
   );
 });
 

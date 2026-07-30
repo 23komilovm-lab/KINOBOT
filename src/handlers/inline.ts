@@ -26,16 +26,15 @@ inlineHandler.on("inline_query", async (ctx) => {
     const link = `https://t.me/${ctx.me.username}?start=ref_${refId}`;
     const inviter = await prisma.user.findUnique({ where: { id: BigInt(refId) } });
     const inviterName = inviter?.firstName?.trim() || "Do'stingiz";
-    const photoUrl = await getSetting(KEYS.referralPhotoUrl, "");
-
     const caption =
       `🎬 <b>${e.escapeHtml(inviterName)}</b> sizni <b>Kino vaqti</b> botiga taklif qilmoqda!\n\n` +
       `Minglab kino va serial — bepul va tez. 🍿`;
 
-    // Taklif rasmi o'rnatilgan bo'lsa — matn yonida KICHIK rasm ko'rinadi
-    // (Telegram link-preview uslubi). Rasm ochiq havolada bo'lishi shart,
-    // shuning uchun admin panelda u kino kanaliga post qilinib, havolasi
-    // saqlanadi. Havola bo'lmasa — oddiy matn, preview o'chirilgan holda.
+    // Matn yonidagi kichik rasm — BOTNING O'Z avatari. Telegram t.me havolasi
+    // uchun preview yasaganda bot rasmi, nomi va tavsifini ko'rsatadi.
+    // Shuning uchun hech qanday kanalga rasm post qilish shart emas; ustiga
+    // preview bosilsa to'g'ridan-to'g'ri bot referal kodi bilan ochiladi.
+    // Rasmni almashtirish: @BotFather → /setuserpic.
     await ctx.answerInlineQuery(
       [
         {
@@ -46,9 +45,7 @@ inlineHandler.on("inline_query", async (ctx) => {
           input_message_content: {
             message_text: caption,
             parse_mode: "HTML" as const,
-            link_preview_options: photoUrl
-              ? { url: photoUrl, prefer_small_media: true, show_above_text: false }
-              : { is_disabled: true },
+            link_preview_options: { url: link, prefer_small_media: true, show_above_text: false },
           },
           reply_markup: { inline_keyboard: [[{ text: "🎬 Botni ochish", url: link }]] },
         },
