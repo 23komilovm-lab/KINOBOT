@@ -539,6 +539,24 @@ broadcastHandler.callbackQuery("bc:send", async (ctx) => {
   void runBroadcast(ctx, bcast, chatId, statusMsgId);
 });
 
+/** Progress xabari: foiz, hisob va qolgan taxminiy vaqt (32 daqiqalik yuborishda zarur) */
+function progressText(r: BulkResult, startedAt: number): string {
+  const pct = r.total > 0 ? Math.floor((r.processed / r.total) * 100) : 0;
+  const elapsedSec = (Date.now() - startedAt) / 1000;
+  const rate = elapsedSec > 0 ? r.processed / elapsedSec : 0;
+  const leftSec = rate > 0 ? Math.ceil((r.total - r.processed) / rate) : 0;
+  const eta = leftSec >= 60 ? `~${Math.ceil(leftSec / 60)} daqiqa` : `~${leftSec} soniya`;
+
+  return (
+    `⏳ <b>Yuborilmoqda: ${pct}%</b>\n\n` +
+    `${r.processed} / ${r.total}\n` +
+    `✅ Yetkazildi: <b>${r.sent}</b>` +
+    (r.blocked > 0 ? ` · 🚫 Bloklagan: <b>${r.blocked}</b>` : "") +
+    (r.failed > 0 ? ` · ⚠️ Xato: <b>${r.failed}</b>` : "") +
+    `\n⏱ Taxminan <b>${eta}</b> qoldi`
+  );
+}
+
 /** Ommaviy yuborishni fon rejimida bajaradi va holatni tahrirlab boradi */
 async function runBroadcast(
   ctx: MyContext,
@@ -558,15 +576,15 @@ async function runBroadcast(
 
     await setStatus(`⏳ Yuborilmoqda: 0 / ${users.length}...`, cancelKb);
 
+    const startedAt = Date.now();
     const result = await bulkSend({
       userIds: users,
       send: (uid) =>
         ctx.api.copyMessage(uid, bcast.templateChatId!, bcast.templateMsgId!, { reply_markup: ikb }),
       isCancelled: () => isBulkCancelled(BULK_KEY),
       onProgress: async (r) => {
-        if (r.processed < r.total) {
-          await setStatus(`⏳ Yuborilmoqda: ${r.processed} / ${r.total}...`, cancelKb);
-        }
+        if (r.processed >= r.total) return;
+        await setStatus(progressText(r, startedAt), cancelKb);
       },
     });
 
@@ -747,15 +765,15 @@ broadcastHandler.callbackQuery(/^bc:retry:(\d+)$/, async (ctx) => {
       };
       await setStatus(`🔁 Qayta yuborilmoqda: 0 / ${ids.length}...`, kb([ibtn("⛔️ To'xtatish", "bc:stop", "danger")]));
 
+      const startedAt = Date.now();
       const result = await bulkSend({
         userIds: ids,
         send: (uid) =>
           ctx.api.copyMessage(uid, Number(b.templateChatId), b.templateMsgId!, { reply_markup: ikb }),
         isCancelled: () => isBulkCancelled(BULK_KEY),
         onProgress: async (r) => {
-          if (r.processed < r.total) {
-            await setStatus(`🔁 Qayta yuborilmoqda: ${r.processed} / ${r.total}...`);
-          }
+          if (r.processed >= r.total) return;
+          await setStatus(`🔁 ${progressText(r, startedAt)}`);
         },
       });
 

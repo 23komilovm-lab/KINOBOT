@@ -130,7 +130,7 @@ async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeybo
     (kb as any).inline_keyboard.push([{
       text: checkText,
       callback_data: "sub:check",
-      icon_custom_emoji_id: "5260416304224936047",
+      icon_custom_emoji_id: "5861665979968262792",
     }]);
   }
 

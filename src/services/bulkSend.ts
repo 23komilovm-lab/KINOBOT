@@ -7,6 +7,7 @@ import { prisma } from "../prisma.js";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MIN_INTERVAL_MS = 50;          // ~20 xabar/sekund (Telegram amaliy chegarasi ~30)
+const PROGRESS_INTERVAL_MS = 4_000;  // holat xabari shu oraliqda yangilanadi (~15 tahrir/daqiqa)
 const MAX_ATTEMPTS = 3;              // vaqtinchalik xatolar uchun urinishlar soni
 const MAX_RETRY_AFTER_S = 60;        // 429 dagi retry_after uchun yuqori chegara
 const ABORT_AFTER_CONSECUTIVE = 25;  // ketma-ket shuncha "vaqtinchalik" xato bo'lsa to'xtaymiz
@@ -120,9 +121,10 @@ async function flushBlocked(ids: bigint[]): Promise<void> {
  */
 export async function bulkSend(opts: BulkOptions): Promise<BulkResult> {
   const { userIds, send, onProgress, isCancelled } = opts;
-  // Holat xabarini juda tez-tez tahrirlash o'zi flood limitga urishi mumkin —
-  // butun yuborish davomida ~20 tadan ko'p yangilanish bo'lmasin.
-  const progressEvery = opts.progressEvery ?? Math.max(50, Math.ceil(userIds.length / 20));
+  // Progress VAQT bo'yicha yangilanadi, son bo'yicha emas. Ilgari qadam
+  // `total / 20` edi — 38 000 foydalanuvchida bu 1900 tadan bir marta, ya'ni
+  // ~1.5 daqiqa jim turib keyin sakrash degani edi (qotib qolgandek ko'rinardi).
+  const progressEvery = opts.progressEvery;
 
   const result: BulkResult = {
     total: userIds.length,
@@ -137,6 +139,7 @@ export async function bulkSend(opts: BulkOptions): Promise<BulkResult> {
   const blockedIds: bigint[] = [];
   let consecutiveFailures = 0;
   let lastCallAt = 0;
+  let lastReportAt = Date.now();
 
   const pace = async () => {
     const wait = MIN_INTERVAL_MS - (Date.now() - lastCallAt);
@@ -203,7 +206,13 @@ export async function bulkSend(opts: BulkOptions): Promise<BulkResult> {
       }
     }
 
-    if (result.processed % progressEvery === 0) await report();
+    // Progress: har PROGRESS_INTERVAL_MS da bir marta (yoki chaqiruvchi aniq
+    // qadam bergan bo'lsa — o'shanda). Katta bazada ham silliq yangilanadi.
+    const byCount = progressEvery ? result.processed % progressEvery === 0 : false;
+    if (byCount || Date.now() - lastReportAt >= PROGRESS_INTERVAL_MS) {
+      lastReportAt = Date.now();
+      await report();
+    }
   }
 
   await flushBlocked(blockedIds);
