@@ -466,7 +466,10 @@ funnelHandler.on("message:text", async (ctx, next) => {
     f.title = text.slice(0, 100);
     f.state = "question";
     setF(ctx, f);
-    await ctx.reply("2️⃣ Foydalanuvchiga ko'rsatiladigan <b>savol</b> matnini kiriting:");
+    await ctx.reply(
+      "2️⃣ Foydalanuvchiga ko'rsatiladigan <b>savol</b> matnini kiriting:",
+      { reply_markup: kb([ibtn("❌ Bekor", "fn:menu", "danger")]) }
+    );
     return;
   }
 
@@ -504,7 +507,10 @@ funnelHandler.on("message:text", async (ctx, next) => {
     f.sendDateFrom = formatYmd(p);
     f.state = "sendDateTo";
     setF(ctx, f);
-    await ctx.reply("Tugash sanasini kiriting (DD.MM.YYYY):");
+    await ctx.reply(
+      "Tugash sanasini kiriting (DD.MM.YYYY):",
+      { reply_markup: kb([ibtn("❌ Bekor", "fn:menu", "danger")]) }
+    );
     return;
   }
 

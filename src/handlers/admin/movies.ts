@@ -302,11 +302,21 @@ async function renderGlobalMovieButtonEditor(ctx: MyContext, edit = true) {
     [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)],
   );
 
+  // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
+  // (edit=false) eskisi o'chirilib, o'rniga yangisi yoziladi — aks holda har
+  // tahrirlashda eski panel chatda tirik tugmalari bilan qolib ketardi.
   if (edit) {
-    await ctx.editMessageText(text, { reply_markup }).catch(() => {});
-  } else {
-    await ctx.reply(text, { reply_markup });
+    const ok = await ctx.editMessageText(text, { reply_markup }).catch(() => null);
+    if (ok) {
+      const mid = ctx.callbackQuery?.message?.message_id;
+      if (mid) ctx.session.scratch = { ...(ctx.session.scratch ?? {}), gbtnPanelMsgId: mid };
+      return;
+    }
   }
+  const prevId = ctx.session.scratch?.gbtnPanelMsgId as number | undefined;
+  if (prevId) await ctx.api.deleteMessage(ctx.chat!.id, prevId).catch(() => {});
+  const sent = await ctx.reply(text, { reply_markup });
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), gbtnPanelMsgId: sent.message_id };
 }
 
 moviesHandler.callbackQuery("mv:gbtncolors", async (ctx) => {
@@ -337,13 +347,13 @@ moviesHandler.callbackQuery("mv:gbtntoggle", async (ctx) => {
 moviesHandler.callbackQuery("mv:gbtntext", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), movieBtnField: "text" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>");
+  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>", { reply_markup: cancelKeyboard() });
 });
 
 moviesHandler.callbackQuery("mv:gbtnurl", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), movieBtnField: "url" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>");
+  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>", { reply_markup: cancelKeyboard() });
 });
 
 moviesHandler.callbackQuery(/^mv:gbtnsty:(primary|success|danger|random)$/, async (ctx) => {
@@ -408,11 +418,20 @@ async function renderPostDeliveryEditor(ctx: MyContext, edit = true) {
     [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)],
   );
 
+  // Panelni bitta xabar sifatida ushlab turamiz — izoh yuqoridagi
+  // renderGlobalMovieButtonEditor'da (bir xil naqsh, xuddi shu bug edi).
   if (edit) {
-    await ctx.editMessageText(msg, { reply_markup }).catch(() => {});
-  } else {
-    await ctx.reply(msg, { reply_markup });
+    const ok = await ctx.editMessageText(msg, { reply_markup }).catch(() => null);
+    if (ok) {
+      const mid = ctx.callbackQuery?.message?.message_id;
+      if (mid) ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pdPanelMsgId: mid };
+      return;
+    }
   }
+  const prevId = ctx.session.scratch?.pdPanelMsgId as number | undefined;
+  if (prevId) await ctx.api.deleteMessage(ctx.chat!.id, prevId).catch(() => {});
+  const sent = await ctx.reply(msg, { reply_markup });
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pdPanelMsgId: sent.message_id };
 }
 
 moviesHandler.callbackQuery("mv:pdtoggle", async (ctx) => {
@@ -435,20 +454,21 @@ moviesHandler.callbackQuery("mv:pdtext", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.reply(
     "Kino yuborilgandan keyin chiqadigan <b>matnni</b> yuboring (HTML teglar mumkin).\n\n" +
-    "Masalan: <code>📲 Ilovalar do'koni kerakmi? Apk Topla orqali yuklab oling!</code>"
+    "Masalan: <code>📲 Ilovalar do'koni kerakmi? Apk Topla orqali yuklab oling!</code>",
+    { reply_markup: cancelKeyboard() }
   );
 });
 
 moviesHandler.callbackQuery("mv:pdbtntext", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pdField: "btntext" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka nomini yuboring. Masalan: <code>📥 Apk Topla'ni yuklash</code>");
+  await ctx.reply("Knopka nomini yuboring. Masalan: <code>📥 Apk Topla'ni yuklash</code>", { reply_markup: cancelKeyboard() });
 });
 
 moviesHandler.callbackQuery("mv:pdbtnurl", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pdField: "btnurl" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/apktopla</code>");
+  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/apktopla</code>", { reply_markup: cancelKeyboard() });
 });
 
 moviesHandler.callbackQuery("mv:pdbtncolors", async (ctx) => {

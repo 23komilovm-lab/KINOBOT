@@ -3,7 +3,7 @@ import type { ChatAdministratorRights } from "grammy/types";
 import { adminCan, getChannelLimit } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { ce, e } from "../../utils/emoji.js";
-import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
+import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, cancelKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { resolveButtonStyle, isValidUrl } from "../../utils/contentButton.js";
 import type { MyContext } from "../../types.js";
@@ -271,11 +271,20 @@ async function renderBtnSettings(ctx: MyContext, edit = true) {
     [ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)],
   );
 
+  // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
+  // (edit=false) eskisi o'chirilib, o'rniga yangisi yoziladi.
   if (edit) {
-    await ctx.editMessageText(text, { reply_markup }).catch(() => {});
-  } else {
-    await ctx.reply(text, { reply_markup });
+    const ok = await ctx.editMessageText(text, { reply_markup }).catch(() => null);
+    if (ok) {
+      const mid = ctx.callbackQuery?.message?.message_id;
+      if (mid) ctx.session.scratch = { ...(ctx.session.scratch ?? {}), chBtnPanelMsgId: mid };
+      return;
+    }
   }
+  const prevId = ctx.session.scratch?.chBtnPanelMsgId as number | undefined;
+  if (prevId) await ctx.api.deleteMessage(ctx.chat!.id, prevId).catch(() => {});
+  const sent = await ctx.reply(text, { reply_markup });
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), chBtnPanelMsgId: sent.message_id };
 }
 
 channelsHandler.callbackQuery("ch:chlbltext", async (ctx) => {
@@ -283,14 +292,18 @@ channelsHandler.callbackQuery("ch:chlbltext", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), editChannelDefLabel: true };
   await ctx.reply(
     `Kanal knopkasining <b>standart yorlig'ini</b> yuboring.\n\n` +
-    `Masalan: <code>+ Kanalga obuna bo'lish</code>`
+    `Masalan: <code>+ Kanalga obuna bo'lish</code>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
 channelsHandler.callbackQuery("ch:subbtntext", async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), editSubBtnText: true };
-  await ctx.reply('Yangi "Tekshirish" knopkasi matnini yuboring:\n\nMasalan: <code>✅ A\'zo bo\'ldim</code>');
+  await ctx.reply(
+    'Yangi "Tekshirish" knopkasi matnini yuboring:\n\nMasalan: <code>✅ A\'zo bo\'ldim</code>',
+    { reply_markup: cancelKeyboard() }
+  );
 });
 
 channelsHandler.callbackQuery(/^ch:subbtnsty:(primary|success|danger|random)$/, async (ctx) => {

@@ -340,11 +340,20 @@ async function renderGlobalSerialButtonEditor(ctx: MyContext, edit = true) {
     [ibtn("Orqaga", "sr:back", undefined, BE.backMenu)],
   );
 
+  // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
+  // (edit=false) eskisi o'chirilib, o'rniga yangisi yoziladi.
   if (edit) {
-    await ctx.editMessageText(text, { reply_markup }).catch(() => {});
-  } else {
-    await ctx.reply(text, { reply_markup });
+    const ok = await ctx.editMessageText(text, { reply_markup }).catch(() => null);
+    if (ok) {
+      const mid = ctx.callbackQuery?.message?.message_id;
+      if (mid) ctx.session.scratch = { ...(ctx.session.scratch ?? {}), sbtnPanelMsgId: mid };
+      return;
+    }
   }
+  const prevId = ctx.session.scratch?.sbtnPanelMsgId as number | undefined;
+  if (prevId) await ctx.api.deleteMessage(ctx.chat!.id, prevId).catch(() => {});
+  const sent = await ctx.reply(text, { reply_markup });
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), sbtnPanelMsgId: sent.message_id };
 }
 
 serialsHandler.callbackQuery("sr:gbtncolors", async (ctx) => {
@@ -375,13 +384,13 @@ serialsHandler.callbackQuery("sr:gbtntoggle", async (ctx) => {
 serialsHandler.callbackQuery("sr:gbtntext", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), serialBtnField: "text" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>");
+  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>", { reply_markup: cancelKeyboard() });
 });
 
 serialsHandler.callbackQuery("sr:gbtnurl", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), serialBtnField: "url" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>");
+  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>", { reply_markup: cancelKeyboard() });
 });
 
 serialsHandler.callbackQuery(/^sr:gbtnsty:(primary|success|danger|random)$/, async (ctx) => {

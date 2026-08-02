@@ -5,7 +5,7 @@ import {
   setAdminPerms, setAdminChannelLimit,
 } from "../../config.js";
 import { e } from "../../utils/emoji.js";
-import { ADMIN_MENU_TEXT, adminMenuKeyboard, ibtn, kb } from "../../utils/keyboard.js";
+import { ADMIN_MENU_TEXT, adminMenuKeyboard, cancelKeyboard, ibtn, kb } from "../../utils/keyboard.js";
 import { SECTIONS, SECTION_LABELS, parsePerms, serializePerms, type Section } from "../../utils/permissions.js";
 import type { MyContext } from "../../types.js";
 import type { User } from "@prisma/client";
@@ -15,6 +15,8 @@ export const adminsHandler = new Composer<MyContext>();
 const PAGE = 8;
 const REQUEST_USERS = 77;
 const BACK_TEXT = "Orqaga";
+const CANCEL = "❌ Bekor qilish";
+const isCancel = (t?: string) => t === CANCEL || t === "/cancel";
 
 function isOwnerId(id: bigint): boolean {
   return config.ownerIds.includes(id);
@@ -77,13 +79,22 @@ async function renderAdminMenu(ctx: MyContext, edit = false) {
     [ibtn("Orqaga", "botset:back")],
   );
 
+  // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
+  // (edit=false, standart holat) eskisi o'chirilib, o'rniga yangisi yoziladi —
+  // aks holda har "admin qo'shildi" xabaridan keyin yangi panel qo'shilib,
+  // eskisi tirik tugmalari bilan chatda qolib ketardi.
   if (edit) {
-    await ctx.editMessageText(text, { reply_markup: markup }).catch(async () => {
-      await ctx.reply(text, { reply_markup: markup });
-    });
-    return;
+    const ok = await ctx.editMessageText(text, { reply_markup: markup }).catch(() => null);
+    if (ok) {
+      const mid = ctx.callbackQuery?.message?.message_id;
+      if (mid) ctx.session.scratch = { ...(ctx.session.scratch ?? {}), admPanelMsgId: mid };
+      return;
+    }
   }
-  await ctx.reply(text, { reply_markup: markup });
+  const prevId = ctx.session.scratch?.admPanelMsgId as number | undefined;
+  if (prevId) await ctx.api.deleteMessage(ctx.chat!.id, prevId).catch(() => {});
+  const sent = await ctx.reply(text, { reply_markup: markup });
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), admPanelMsgId: sent.message_id };
 }
 
 adminsHandler.hears(ADMIN_MENU_TEXT, async (ctx) => {
@@ -115,7 +126,8 @@ adminsHandler.callbackQuery("adm:add", async (ctx) => {
   await ctx.reply(
     `Admin qilinadigan foydalanuvchining <b>ID</b> yoki <b>username</b>ini yuboring.\n\n` +
     `Masalan: <code>123456789</code> yoki <code>@username</code>\n\n` +
-    `<i>Username orqali faqat botga oldin kirgan foydalanuvchi topiladi.</i>`
+    `<i>Username orqali faqat botga oldin kirgan foydalanuvchi topiladi.</i>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
@@ -311,7 +323,8 @@ adminsHandler.callbackQuery(/^adm:limit:(\d+)$/, async (ctx) => {
   await ctx.reply(
     `Ushbu admin majburiy obunaga qo'sha oladigan <b>maksimal kanal sonini</b> yuboring.\n\n` +
     `Masalan: <code>2</code>\n` +
-    `Cheksiz qilish uchun: <code>-</code>`
+    `Cheksiz qilish uchun: <code>-</code>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
@@ -338,6 +351,11 @@ adminsHandler.on("message:text", async (ctx, next) => {
   const limitTarget = ctx.session.scratch?.adminLimitTarget as string | undefined;
   if (limitTarget) {
     const t = ctx.message.text.trim();
+    if (isCancel(t)) {
+      if (ctx.session.scratch) delete ctx.session.scratch.adminLimitTarget;
+      await ctx.reply("❌ Bekor qilindi.", { reply_markup: { remove_keyboard: true } });
+      return;
+    }
     if (ctx.session.scratch) delete ctx.session.scratch.adminLimitTarget;
     const id = BigInt(limitTarget);
     const limit = t === "-" ? null : (/^\d+$/.test(t) ? Number(t) : null);
@@ -352,6 +370,11 @@ adminsHandler.on("message:text", async (ctx, next) => {
   if (ctx.session.scratch?.adminAction !== "add") return next();
   const text = ctx.message.text.trim();
   if (text.startsWith("/")) { if (ctx.session.scratch) delete ctx.session.scratch.adminAction; return next(); }
+  if (isCancel(text)) {
+    if (ctx.session.scratch) delete ctx.session.scratch.adminAction;
+    await ctx.reply("❌ Bekor qilindi.", { reply_markup: { remove_keyboard: true } });
+    return;
+  }
 
   let target: User | null = null;
   if (/^\d+$/.test(text)) {

@@ -1,7 +1,7 @@
 import { Composer } from "grammy";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
-import { ibtn, BE, kb } from "../../utils/keyboard.js";
+import { ibtn, BE, kb, cancelKeyboard } from "../../utils/keyboard.js";
 import type { MyContext } from "../../types.js";
 
 export const joinStatsHandler = new Composer<MyContext>();
@@ -159,7 +159,7 @@ joinStatsHandler.callbackQuery(/^jr:approve:(-?\d+):(\d+|all)$/, async (ctx) => 
 joinStatsHandler.callbackQuery(/^jr:approvecustom:(-?\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), approveCustomChannelId: ctx.match[1] };
-  await ctx.reply("Nechta so'rovni tasdiqlash kerak? Sonni yuboring:");
+  await ctx.reply("Nechta so'rovni tasdiqlash kerak? Sonni yuboring:", { reply_markup: cancelKeyboard() });
 });
 
 joinStatsHandler.on("message:text", async (ctx, next) => {

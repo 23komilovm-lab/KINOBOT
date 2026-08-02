@@ -2,7 +2,7 @@ import { Composer } from "grammy";
 import { adminCan } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
-import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
+import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, cancelKeyboard, ibtn, BE, kb } from "../../utils/keyboard.js";
 import { getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { getReferralReward } from "../../utils/referral.js";
 import type { MyContext } from "../../types.js";
@@ -174,6 +174,7 @@ referralsHandler.callbackQuery(/^ref:msg:(\d+)$/, async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), refMsgTarget: refId };
   await ctx.reply(
     `✉️ Ushbu foydalanuvchiga yuboriladigan <b>xabarni</b> yozing (matn, rasm, video):`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 

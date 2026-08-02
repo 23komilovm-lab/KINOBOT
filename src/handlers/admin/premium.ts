@@ -2,7 +2,7 @@ import { Composer } from "grammy";
 import { prisma } from "../../prisma.js";
 import { adminCan } from "../../config.js";
 import { e } from "../../utils/emoji.js";
-import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, contactAdminKb, ibtn, kb, BE } from "../../utils/keyboard.js";
+import { ADMIN_MENU_BUTTONS, adminMenuKeyboard, cancelKeyboard, contactAdminKb, ibtn, kb, BE } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { grantPremium, seedDefaultTariffs, resetToDefaultTariffs } from "../../utils/premium.js";
 import { refreshPaymentNotifications, userLink, METHOD_LABEL } from "../../utils/paymentNotify.js";
@@ -14,6 +14,15 @@ const CONTACT_MARKUP = contactAdminKb();
 
 function can(ctx: MyContext): boolean {
   return adminCan(ctx.from?.id ?? 0, "premium");
+}
+
+const CANCEL = "❌ Bekor qilish";
+const isCancel = (t?: string) => t === CANCEL || t === "/cancel";
+/** Ushbu bo'limdagi barcha matn-kutish holatlarini tozalaydi (bekor qilishda) */
+function clearPrmScratch(ctx: MyContext) {
+  if (!ctx.session.scratch) return;
+  delete ctx.session.scratch.prmField;
+  delete ctx.session.scratch.prmAddTariff;
 }
 
 // ─── Asosiy menyu ────────────────────────────────────────────────────────────
@@ -105,7 +114,8 @@ premiumAdminHandler.callbackQuery("prm:madd", async (ctx) => {
   await ctx.reply(
     `➕ <b>Premium kino qo'shish</b>\n\n` +
     `Kino <b>kodini</b> yuboring (faqat raqam).\n` +
-    `Bir nechta bo'lsa vergul yoki bo'shliq bilan: <code>12, 45, 78</code>`
+    `Bir nechta bo'lsa vergul yoki bo'shliq bilan: <code>12, 45, 78</code>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
@@ -201,7 +211,8 @@ premiumAdminHandler.callbackQuery("prm:sadd", async (ctx) => {
   await ctx.reply(
     `➕ <b>Premium serial qo'shish</b>\n\n` +
     `Serial <b>kodini</b> yuboring (faqat raqam).\n` +
-    `Bir nechta bo'lsa vergul yoki bo'shliq bilan: <code>12, 45, 78</code>`
+    `Bir nechta bo'lsa vergul yoki bo'shliq bilan: <code>12, 45, 78</code>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
@@ -425,7 +436,8 @@ premiumAdminHandler.callbackQuery("prm:tadd", async (ctx) => {
     `(eski narx va stars — ixtiyoriy)\n\n` +
     `Masalan: <code>1 oy | 30 | 5000</code>\n` +
     `yoki chegirma bilan: <code>1 oy | 30 | 5000 | 25000</code>\n` +
-    `yoki stars bilan: <code>1 oy | 30 | 5000 | 25000 | 35</code>`
+    `yoki stars bilan: <code>1 oy | 30 | 5000 | 25000 | 35</code>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
@@ -459,7 +471,8 @@ premiumAdminHandler.callbackQuery(/^prm:tstars:(\d+)$/, async (ctx) => {
   await ctx.reply(
     `⭐ <b>${e.escapeHtml(tariff.label)}</b> uchun Stars narxini yuboring.\n\n` +
     `Hozirgi: <b>${tariff.starsPrice ?? "sozlanmagan"}</b>\n` +
-    `O'chirish uchun: <code>-</code>`
+    `O'chirish uchun: <code>-</code>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
@@ -531,27 +544,27 @@ premiumAdminHandler.callbackQuery("prm:togglewarn", async (ctx) => {
 premiumAdminHandler.callbackQuery("prm:setfreq", async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "freq" };
-  await ctx.reply("Bepul so'rovlar sonini yuboring (0 = cheksiz):");
+  await ctx.reply("Bepul so'rovlar sonini yuboring (0 = cheksiz):", { reply_markup: cancelKeyboard() });
 });
 premiumAdminHandler.callbackQuery("prm:setfdays", async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "fdays" };
-  await ctx.reply("Bepul kunlar sonini yuboring (0 = cheksiz):");
+  await ctx.reply("Bepul kunlar sonini yuboring (0 = cheksiz):", { reply_markup: cancelKeyboard() });
 });
 premiumAdminHandler.callbackQuery("prm:setai", async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "ailimit" };
-  await ctx.reply("Bepul AI so'rovlari/kun sonini yuboring (0 = cheksiz):");
+  await ctx.reply("Bepul AI so'rovlari/kun sonini yuboring (0 = cheksiz):", { reply_markup: cancelKeyboard() });
 });
 premiumAdminHandler.callbackQuery("prm:setpay", async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "pay" };
-  await ctx.reply("💳 Karta orqali to'lov ma'lumotini yuboring (karta raqami, egasi va ko'rsatma):");
+  await ctx.reply("💳 Karta orqali to'lov ma'lumotini yuboring (karta raqami, egasi va ko'rsatma):", { reply_markup: cancelKeyboard() });
 });
 premiumAdminHandler.callbackQuery("prm:setpayton", async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "payton" };
-  await ctx.reply("💎 TON orqali to'lov ma'lumotini yuboring (wallet manzili va ko'rsatma):");
+  await ctx.reply("💎 TON orqali to'lov ma'lumotini yuboring (wallet manzili va ko'rsatma):", { reply_markup: cancelKeyboard() });
 });
 
 // ─── Qo'lda premium berish ───────────────────────────────────────────────────
@@ -560,7 +573,8 @@ premiumAdminHandler.callbackQuery("prm:grant", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), prmField: "grant" };
   await ctx.reply(
     `🎁 <b>Qo'lda premium berish</b>\n\nFormat: <code>foydalanuvchi_ID kun</code>\n` +
-    `Masalan: <code>123456789 30</code>`
+    `Masalan: <code>123456789 30</code>`,
+    { reply_markup: cancelKeyboard() }
   );
 });
 
@@ -600,6 +614,14 @@ premiumAdminHandler.on("message:text", async (ctx, next) => {
   if (!s) return next();
 
   const text = ctx.message.text.trim();
+
+  // Faqat shu bo'lim kutayotgan holatlardan chiqadi — boshqa matn-kutish
+  // holatlari (masalan boshqa bo'limning o'z prmField'i) buzilmasin.
+  if ((s.prmField || s.prmAddTariff) && isCancel(text)) {
+    clearPrmScratch(ctx);
+    await ctx.reply("❌ Bekor qilindi.", { reply_markup: { remove_keyboard: true } });
+    return;
+  }
 
   if (s.prmAddTariff) {
     delete s.prmAddTariff;
