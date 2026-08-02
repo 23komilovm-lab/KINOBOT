@@ -19,8 +19,8 @@ const stop = (ctx: MyContext) =>
 
 function serialMenu() {
   return kb(
-    [ibtn("Serial qo'shish", "sr:add", "success"), ibtn("Qism qo'shish", "sr:addep", "success")],
-    [ibtn("Ro'yxat", "sr:list", "primary"), ibtn("O'chirish", "sr:dellist", "danger")],
+    [ibtn("Serial qo'shish", "sr:add", "success", BE.chAdd), ibtn("Qism qo'shish", "sr:addep", "success", BE.movie)],
+    [ibtn("Ro'yxat", "sr:list", "primary", BE.chList), ibtn("O'chirish", "sr:dellist", "danger", BE.chDelete)],
     [ibtn("Knopka boshqaruvi", "sr:btnlist:0")],
     [ibtn("Menyuga qaytish", "sr:close", undefined, BE.backMenu)]
   );

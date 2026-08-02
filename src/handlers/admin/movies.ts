@@ -35,8 +35,8 @@ function cleanGenre(raw: string | null): string | null {
 
 function movieMenu() {
   return kb(
-    [ibtn("Kino qo'shish", "mv:add", "success"), ibtn("Ro'yxat", "mv:list:0", "primary")],
-    [ibtn("Knopka boshqaruvi", "mv:btnlist:0"), ibtn("O'chirish", "mv:del:0", "danger")],
+    [ibtn("Kino qo'shish", "mv:add", "success", BE.chAdd), ibtn("Ro'yxat", "mv:list:0", "primary", BE.chList)],
+    [ibtn("Knopka boshqaruvi", "mv:btnlist:0"), ibtn("O'chirish", "mv:del:0", "danger", BE.chDelete)],
     [ibtn("📲 Keyingi xabar (post)", "mv:pdmenu", "primary")],
     [ibtn("Menyuga qaytish", "mv:close", undefined, BE.backMenu)],
   );
