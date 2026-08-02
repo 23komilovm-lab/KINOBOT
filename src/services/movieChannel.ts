@@ -104,6 +104,23 @@ export function movieWatchButton(botUsername: string, code: number) {
 }
 
 /**
+ * Xatoni iloji boricha o'qish mumkin bo'lgan matnga aylantiradi.
+ * grammY'ning GrammyError'i `.description` da Telegramning o'z xabarini
+ * beradi (masalan "Bad Request: VIDEO_FILE_ID_INVALID") — bu `.message`ga
+ * qaraganda aniqroq. Hech qanday tanish maydon topilmasa ham (masalan
+ * xato Error obyekti bo'lmasa), oxirgi chora sifatida String(err) qaytariladi —
+ * "noma'lum xato" degan ma'lumotsiz xabar boshqa hech qachon chiqmasin.
+ */
+export function describeError(err: unknown): string {
+  if (err && typeof err === "object") {
+    const anyErr = err as { description?: unknown; message?: unknown };
+    if (typeof anyErr.description === "string" && anyErr.description) return anyErr.description;
+    if (typeof anyErr.message === "string" && anyErr.message) return anyErr.message;
+  }
+  return String(err);
+}
+
+/**
  * Qisqa videoni kino kanalga tashlaydi.
  * { msgId } yoki { error } qaytaradi.
  */
@@ -115,8 +132,8 @@ export async function postToMovieChannel(
   if (!config.movieChannelId) {
     return { msgId: null, error: "MOVIE_CHANNEL_ID sozlanmagan (.env)" };
   }
-  const btn = movieWatchButton(ctx.me.username, movie.code);
   try {
+    const btn = movieWatchButton(ctx.me.username, movie.code);
     const sent = await ctx.api.sendVideo(config.movieChannelId, shortFileId, {
       caption: movieChannelCaption(movie, true), // kanal — janrga mos ikonka
       parse_mode: "HTML",
@@ -125,6 +142,9 @@ export async function postToMovieChannel(
     });
     return { msgId: sent.message_id, error: null };
   } catch (err) {
-    return { msgId: null, error: (err as Error).message };
+    // Serverga ham yoziladi — ilgari faqat adminning chatiga ketardi, keyingi
+    // safar "nomaʼlum xato" chiqsa ham Railway logidan aniq sababni ko'rish mumkin.
+    console.error(`🛑 Qisqa video kino kanalga tashlanmadi (kino #${movie.code}):`, err);
+    return { msgId: null, error: describeError(err) };
   }
 }

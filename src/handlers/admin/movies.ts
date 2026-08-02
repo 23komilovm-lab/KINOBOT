@@ -6,7 +6,7 @@ import { ce, e } from "../../utils/emoji.js";
 import { ADMIN_MENU_BUTTONS, ibtn, BE, kb, cancelKeyboard, adminMenuKeyboard } from "../../utils/keyboard.js";
 import { isValidUrl, resolveButtonStyle } from "../../utils/contentButton.js";
 import { getSetting, setSetting, getGlobalButton, getBool, setBool, KEYS } from "../../utils/settings.js";
-import { postToMovieChannel } from "../../services/movieChannel.js";
+import { postToMovieChannel, describeError } from "../../services/movieChannel.js";
 import { aiEnabled, askAI } from "../../services/ai.js";
 import type { MyContext } from "../../types.js";
 
@@ -168,7 +168,8 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
       });
       baseMsgId = sent.message_id;
     } catch (err) {
-      await ctx.reply(`⚠️ Baza kanalga tashlab bo'lmadi: ${(err as Error).message}`);
+      console.error(`🛑 Kino baza kanalga tashlanmadi (kod ${code}):`, err);
+      await ctx.reply(`⚠️ Baza kanalga tashlab bo'lmadi: ${e.escapeHtml(describeError(err))}`);
     }
   }
 
