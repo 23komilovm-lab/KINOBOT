@@ -68,3 +68,11 @@ export function todayUz(): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${uz.getUTCFullYear()}-${p(uz.getUTCMonth() + 1)}-${p(uz.getUTCDate())}`;
 }
+
+/** Berilgan UTC instant'ni Toshkent vaqti bo'yicha "YYYY-MM-DD" kun kaliti — UTC kun emas,
+ * aks holda kechki soatlarda qo'shilgan userlar noto'g'ri kunga tushardi. */
+export function uzDayKey(d: Date): string {
+  const uz = new Date(d.getTime() + UZ_OFFSET_MS);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${uz.getUTCFullYear()}-${p(uz.getUTCMonth() + 1)}-${p(uz.getUTCDate())}`;
+}

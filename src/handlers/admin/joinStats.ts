@@ -2,13 +2,10 @@ import { Composer } from "grammy";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
 import { ibtn, BE, kb, cancelKeyboard } from "../../utils/keyboard.js";
+import { todayUz, dayStartUz } from "../../utils/dateRange.js";
 import type { MyContext } from "../../types.js";
 
 export const joinStatsHandler = new Composer<MyContext>();
-
-function startOfDay(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
 
 /** So'rovlar statistikasini chizadi (callback javobini bermaydi) */
 async function renderStats(ctx: MyContext, edit = true) {
@@ -25,10 +22,12 @@ async function renderStats(ctx: MyContext, edit = true) {
     return;
   }
 
-  const now   = new Date();
-  const today = startOfDay(now);
-  const yest  = new Date(today); yest.setDate(yest.getDate() - 1);
-  const month = new Date(today); month.setDate(1);
+  // Kun chegaralari Toshkent vaqti (UTC+5) bo'yicha — server UTC'da ishlasa ham
+  // "bugun"/"kecha"/"bu oy" admin o'ylagan kundan boshlanadi (3.5).
+  const [y, m, d] = todayUz().split("-").map(Number);
+  const today = dayStartUz({ y, m, d });
+  const yest = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+  const month = dayStartUz({ y, m, d: 1 });
 
   const lines: string[] = [];
   const rows: ReturnType<typeof ibtn>[][] = [];
@@ -46,9 +45,9 @@ async function renderStats(ctx: MyContext, edit = true) {
 
     lines.push(
       `📢 <b>${e.escapeHtml(ch.title)}</b>\n` +
-      `  Bugun: <b>${todayN}</b> | Kecha: <b>${yestN}</b>\n` +
-      `  Bu oy: <b>${monthN}</b> | Jami: <b>${total}</b>\n` +
-      `  Kutilmoqda: <b>${pending}</b>`
+        `  Bugun: <b>${todayN}</b> | Kecha: <b>${yestN}</b>\n` +
+        `  Bu oy: <b>${monthN}</b> | Jami: <b>${total}</b>\n` +
+        `  Kutilmoqda: <b>${pending}</b>`
     );
 
     totalPending += pending;
@@ -85,7 +84,8 @@ async function approveRequests(ctx: MyContext, channelId: bigint, limit?: number
     ...(limit ? { take: limit } : {}),
   });
 
-  let approved = 0, failed = 0;
+  let approved = 0,
+    failed = 0;
   for (const req of pending) {
     try {
       await ctx.api.approveChatJoinRequest(Number(req.channelId), Number(req.userId));
@@ -106,26 +106,31 @@ joinStatsHandler.callbackQuery(/^jr:menu:(-?\d+)$/, async (ctx) => {
   const pending = await prisma.joinRequest.count({ where: { channelId, status: "pending" } });
 
   if (pending === 0) {
-    await ctx.answerCallbackQuery({ text: "Bu kanalda kutilayotgan so'rov yo'q.", show_alert: true });
+    await ctx.answerCallbackQuery({
+      text: "Bu kanalda kutilayotgan so'rov yo'q.",
+      show_alert: true,
+    });
     await renderStats(ctx);
     return;
   }
 
-  await ctx.editMessageText(
-    `📢 <b>${e.escapeHtml(ch?.title ?? "Kanal")}</b>\n\n⏳ Kutilmoqda: <b>${pending}</b>\n\nNechtasini tasdiqlaysiz?`,
-    {
-      reply_markup: kb(
-        [
-          ibtn("✅ 10%", `jr:approve:${channelId}:10`, "success"),
-          ibtn("✅ 30%", `jr:approve:${channelId}:30`, "success"),
-          ibtn("✅ 50%", `jr:approve:${channelId}:50`, "success"),
-        ],
-        [ibtn(`✅ Hammasini (${pending})`, `jr:approve:${channelId}:all`, "success", BE.check)],
-        [ibtn("✏️ Sonini yozib qabul qilish", `jr:approvecustom:${channelId}`, "primary")],
-        [ibtn("Orqaga", "ch:jrstats", undefined, BE.backMenu)],
-      ),
-    }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `📢 <b>${e.escapeHtml(ch?.title ?? "Kanal")}</b>\n\n⏳ Kutilmoqda: <b>${pending}</b>\n\nNechtasini tasdiqlaysiz?`,
+      {
+        reply_markup: kb(
+          [
+            ibtn("✅ 10%", `jr:approve:${channelId}:10`, "success"),
+            ibtn("✅ 30%", `jr:approve:${channelId}:30`, "success"),
+            ibtn("✅ 50%", `jr:approve:${channelId}:50`, "success"),
+          ],
+          [ibtn(`✅ Hammasini (${pending})`, `jr:approve:${channelId}:all`, "success", BE.check)],
+          [ibtn("✏️ Sonini yozib qabul qilish", `jr:approvecustom:${channelId}`, "primary")],
+          [ibtn("Orqaga", "ch:jrstats", undefined, BE.backMenu)]
+        ),
+      }
+    )
+    .catch(() => {});
 });
 
 // ============ TASDIQLASH — FOIZ / HAMMASI (bitta kanal uchun) ============
@@ -151,7 +156,7 @@ joinStatsHandler.callbackQuery(/^jr:approve:(-?\d+):(\d+|all)$/, async (ctx) => 
   await renderStats(ctx);
   await ctx.reply(
     `✅ <b>${approved}</b> ta so'rov tasdiqlandi.` +
-    (failed > 0 ? `\n⚠️ ${failed} ta tasdiqlanmadi (eskirgan yoki bot huquqi yetmaydi).` : "")
+      (failed > 0 ? `\n⚠️ ${failed} ta tasdiqlanmadi (eskirgan yoki bot huquqi yetmaydi).` : "")
   );
 });
 
@@ -159,7 +164,9 @@ joinStatsHandler.callbackQuery(/^jr:approve:(-?\d+):(\d+|all)$/, async (ctx) => 
 joinStatsHandler.callbackQuery(/^jr:approvecustom:(-?\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), approveCustomChannelId: ctx.match[1] };
-  await ctx.reply("Nechta so'rovni tasdiqlash kerak? Sonni yuboring:", { reply_markup: cancelKeyboard() });
+  await ctx.reply("Nechta so'rovni tasdiqlash kerak? Sonni yuboring:", {
+    reply_markup: cancelKeyboard(),
+  });
 });
 
 joinStatsHandler.on("message:text", async (ctx, next) => {
@@ -184,7 +191,7 @@ joinStatsHandler.on("message:text", async (ctx, next) => {
   const { approved, failed } = await approveRequests(ctx, channelId, count);
   await ctx.reply(
     `✅ <b>${approved}</b> ta so'rov tasdiqlandi.` +
-    (failed > 0 ? `\n⚠️ ${failed} ta tasdiqlanmadi.` : "")
+      (failed > 0 ? `\n⚠️ ${failed} ta tasdiqlanmadi.` : "")
   );
   await renderStats(ctx, false);
 });

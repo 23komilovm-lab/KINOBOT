@@ -42,10 +42,7 @@ function buildMessage(stage: Stage, until: Date): { text: string; markup: Return
         `${untilStr} sanasida amal qilish muddati yakunlandi. Endi botdan oddiy rejimda foydalanasiz:\n\n` +
         `${CONSEQUENCES}\n\n` +
         `Cheksiz va obunasiz foydalanishni davom ettirish uchun premiumni tiklang 👇`,
-      markup: kb(
-        [ibtn("💎 Premiumni tiklash", "prem:show", "success")],
-        [contactAdminBtn()],
-      ),
+      markup: kb([ibtn("💎 Premiumni tiklash", "prem:show", "success")], [contactAdminBtn()]),
     };
   }
 
@@ -56,10 +53,7 @@ function buildMessage(stage: Stage, until: Date): { text: string; markup: Return
       `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> Amal qilish muddati: <b>${untilStr}</b> — atigi <b>${left}</b> qoldi.\n\n` +
       `Muddat tugagach:\n${CONSEQUENCES}\n\n` +
       `Uzluksiz foydalanish uchun obunani hoziroq uzaytiring 👇`,
-    markup: kb(
-      [ibtn("💎 Obunani uzaytirish", "prem:show", "success")],
-      [contactAdminBtn()],
-    ),
+    markup: kb([ibtn("💎 Obunani uzaytirish", "prem:show", "success")], [contactAdminBtn()]),
   };
 }
 
@@ -128,7 +122,10 @@ export function startPremiumExpiryWatcher(bot: Bot<MyContext>): void {
       const blockedIds = toNotify.map((d) => d.id);
       if (result.blocked > 0) {
         await prisma.user
-          .updateMany({ where: { id: { in: blockedIds }, isBlocked: true }, data: { premiumWarnStage: 3 } })
+          .updateMany({
+            where: { id: { in: blockedIds }, isBlocked: true },
+            data: { premiumWarnStage: 3 },
+          })
           .catch(() => null);
       }
 

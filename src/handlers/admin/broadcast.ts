@@ -3,14 +3,27 @@ import { adminCan } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { ce, e } from "../../utils/emoji.js";
 import {
-  ADMIN_MENU_BUTTONS, BOT_SETTINGS_TEXT, adminMenuKeyboard, ibtn, BE, kb,
+  ADMIN_MENU_BUTTONS,
+  BOT_SETTINGS_TEXT,
+  adminMenuKeyboard,
+  ibtn,
+  BE,
+  kb,
 } from "../../utils/keyboard.js";
 import { resolveButtonStyle } from "../../utils/contentButton.js";
 import { formatUzDateTime } from "../../utils/dateRange.js";
 import {
-  acquireBulkLock, bulkSend, cancelBulk, formatBulkResult, isBulkCancelled,
-  isBulkRunning, releaseBulkLock, type BulkResult,
+  acquireBulkLock,
+  bulkSend,
+  cancelBulk,
+  formatBulkResult,
+  isBulkCancelled,
+  isBulkRunning,
+  releaseBulkLock,
+  type BulkResult,
 } from "../../services/bulkSend.js";
+import { createBroadcastJob, updateBroadcastJob } from "../../services/broadcastJob.js";
+import { log } from "../../utils/logger.js";
 import type { MyContext } from "../../types.js";
 
 export const broadcastHandler = new Composer<MyContext>();
@@ -90,25 +103,24 @@ function broadcastMenu() {
   return kb(
     [ibtn("📤 Hammaga yuborish", "bc:target:all", "primary")],
     [
-      ibtn("🗺 Viloyat bo'yicha",        "bc:target:region",    "success"),
-      ibtn("📊 Funnel javobchilari",     "bc:target:funnel",    "success"),
+      ibtn("🗺 Viloyat bo'yicha", "bc:target:region", "success"),
+      ibtn("📊 Funnel javobchilari", "bc:target:funnel", "success"),
     ],
     [
-      ibtn("📋 So'rovnoma",          "fn:menu",      "primary"),
-      ibtn("🗂 Yuborishlar tarixi",  "bc:history:0", "primary"),
+      ibtn("📋 So'rovnoma", "fn:menu", "primary"),
+      ibtn("🗂 Yuborishlar tarixi", "bc:history:0", "primary"),
     ],
     [ibtn("♻️ Bloklanganlar ro'yxatini tiklash", "bc:unblock", "primary")],
-    [ibtn("Menyuga qaytish", "bc:close", undefined, BE.backMenu)],
+    [ibtn("Menyuga qaytish", "bc:close", undefined, BE.backMenu)]
   );
 }
 
 broadcastHandler.hears(ADMIN_MENU_BUTTONS.broadcast, async (ctx) => {
   if (!adminCan(ctx.from?.id ?? 0, "broadcast")) return;
   clearBcast(ctx);
-  await ctx.reply(
-    `${ce("fire")} <b>Xabar yuborish</b>\n\nKimga yubormoqchisiz?`,
-    { reply_markup: broadcastMenu() }
-  );
+  await ctx.reply(`${ce("fire")} <b>Xabar yuborish</b>\n\nKimga yubormoqchisiz?`, {
+    reply_markup: broadcastMenu(),
+  });
 });
 
 broadcastHandler.callbackQuery("bc:close", async (ctx) => {
@@ -121,10 +133,11 @@ broadcastHandler.callbackQuery("bc:close", async (ctx) => {
 broadcastHandler.callbackQuery("bc:menu", async (ctx) => {
   await ctx.answerCallbackQuery();
   clearBcast(ctx);
-  await ctx.editMessageText(
-    `${ce("fire")} <b>Xabar yuborish</b>\n\nKimga yubormoqchisiz?`,
-    { reply_markup: broadcastMenu() }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(`${ce("fire")} <b>Xabar yuborish</b>\n\nKimga yubormoqchisiz?`, {
+      reply_markup: broadcastMenu(),
+    })
+    .catch(() => {});
 });
 
 // ─── Nishon tanlash ──────────────────────────────────────────────────────────
@@ -133,10 +146,12 @@ broadcastHandler.callbackQuery("bc:target:all", async (ctx) => {
   await ctx.answerCallbackQuery();
   const count = await prisma.user.count({ where: { isBlocked: false } });
   setBcast(ctx, { state: "compose", target: { type: "all" }, buttons: [] });
-  await ctx.editMessageText(
-    `👥 Jami: <b>${count}</b> ta foydalanuvchi\n\nXabarni yuboring (matn, rasm, video, fayl):`,
-    { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `👥 Jami: <b>${count}</b> ta foydalanuvchi\n\nXabarni yuboring (matn, rasm, video, fayl):`,
+      { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
+    )
+    .catch(() => {});
 });
 
 broadcastHandler.callbackQuery("bc:target:region", async (ctx) => {
@@ -165,10 +180,11 @@ broadcastHandler.callbackQuery("bc:target:region", async (ctx) => {
   ]);
   rows.push([ibtn("❌ Bekor", "bc:menu", "danger")]);
 
-  await ctx.editMessageText(
-    "🗺 <b>Qaysi viloyat/shaharga yubormoqchisiz?</b>",
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText("🗺 <b>Qaysi viloyat/shaharga yubormoqchisiz?</b>", {
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 });
 
 broadcastHandler.callbackQuery(/^bc:region:(.+)$/, async (ctx) => {
@@ -176,10 +192,12 @@ broadcastHandler.callbackQuery(/^bc:region:(.+)$/, async (ctx) => {
   const count = await prisma.user.count({ where: { region, isBlocked: false } });
   await ctx.answerCallbackQuery();
   setBcast(ctx, { state: "compose", target: { type: "region", region }, buttons: [] });
-  await ctx.editMessageText(
-    `🗺 Viloyat: <b>${e.escapeHtml(region)}</b>\n👥 Foydalanuvchilar: <b>${count}</b>\n\nXabarni yuboring:`,
-    { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `🗺 Viloyat: <b>${e.escapeHtml(region)}</b>\n👥 Foydalanuvchilar: <b>${count}</b>\n\nXabarni yuboring:`,
+      { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
+    )
+    .catch(() => {});
 });
 
 broadcastHandler.callbackQuery("bc:target:funnel", async (ctx) => {
@@ -191,10 +209,11 @@ broadcastHandler.callbackQuery("bc:target:funnel", async (ctx) => {
   await ctx.answerCallbackQuery();
   const rows = surveys.map((s) => [ibtn(s.title, `bc:survey:${s.id}`, "primary")]);
   rows.push([ibtn("❌ Bekor", "bc:menu", "danger")]);
-  await ctx.editMessageText(
-    "📊 <b>Qaysi so'rovnoma javobchilariga yubormoqchisiz?</b>",
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText("📊 <b>Qaysi so'rovnoma javobchilariga yubormoqchisiz?</b>", {
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 });
 
 broadcastHandler.callbackQuery(/^bc:survey:(\d+)$/, async (ctx) => {
@@ -203,7 +222,10 @@ broadcastHandler.callbackQuery(/^bc:survey:(\d+)$/, async (ctx) => {
     where: { id: surveyId },
     include: { options: { orderBy: { sortOrder: "asc" } } },
   });
-  if (!survey) { await ctx.answerCallbackQuery(); return; }
+  if (!survey) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
   await ctx.answerCallbackQuery();
 
   // Har bir variant bo'yicha javoblar soni
@@ -219,26 +241,28 @@ broadcastHandler.callbackQuery(/^bc:survey:(\d+)$/, async (ctx) => {
   const rows = survey.options.map((o) => [
     ibtn(`${o.text} (${countOf(o.id)})`, `bc:survopt:${surveyId}:${o.id}`, "primary"),
   ]);
-  rows.push([ibtn(`📊 Barcha javobchilar (${totalAnswers})`, `bc:survopt:${surveyId}:0`, "success")]);
+  rows.push([
+    ibtn(`📊 Barcha javobchilar (${totalAnswers})`, `bc:survopt:${surveyId}:0`, "success"),
+  ]);
   rows.push([ibtn("❌ Bekor", "bc:menu", "danger")]);
-  await ctx.editMessageText(
-    `📊 <b>${e.escapeHtml(survey.title)}</b>\n\nQaysi javob berganlar?`,
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(`📊 <b>${e.escapeHtml(survey.title)}</b>\n\nQaysi javob berganlar?`, {
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 });
 
 broadcastHandler.callbackQuery(/^bc:survopt:(\d+):(\d+)$/, async (ctx) => {
   const [surveyId, optionId] = [Number(ctx.match[1]), Number(ctx.match[2])];
-  const where = optionId === 0
-    ? { surveyId }
-    : { surveyId, optionId };
+  const where = optionId === 0 ? { surveyId } : { surveyId, optionId };
   const count = await prisma.surveyResponse.count({ where });
   await ctx.answerCallbackQuery();
   setBcast(ctx, { state: "compose", target: { type: "funnel", surveyId, optionId }, buttons: [] });
-  await ctx.editMessageText(
-    `📊 Javobchilar: <b>${count}</b> ta\n\nXabarni yuboring:`,
-    { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(`📊 Javobchilar: <b>${count}</b> ta\n\nXabarni yuboring:`, {
+      reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]),
+    })
+    .catch(() => {});
 });
 
 // ─── Xabar shabloni qabul qilish ─────────────────────────────────────────────
@@ -260,7 +284,10 @@ broadcastHandler.on("message", async (ctx, next) => {
 
   // ── Knopka matni ──
   if (bcast.state === "btnText") {
-    if (!text) { await ctx.reply("❌ Knopka matnini <b>yozib</b> yuboring."); return; }
+    if (!text) {
+      await ctx.reply("❌ Knopka matnini <b>yozib</b> yuboring.");
+      return;
+    }
     bcast.pendingBtnText = text.slice(0, 64);
     bcast.state = "btnUrl";
     setBcast(ctx, bcast);
@@ -283,19 +310,14 @@ broadcastHandler.on("message", async (ctx, next) => {
     // bilan cheklangan va uzunroq havolalar butun klaviaturani buzardi.
     bcast.pendingBtnUrl = url;
     setBcast(ctx, bcast);
-    await ctx.reply(
-      "🎨 Knopka rangini tanlang:",
-      {
-        reply_markup: kb(
-          [
-            ibtn("Ko'k",   "bc:btnstyle:primary", "primary"),
-            ibtn("Yashil", "bc:btnstyle:success", "success"),
-            ibtn("Qizil",  "bc:btnstyle:danger",  "danger"),
-            ibtn("Random", "bc:btnstyle:random",  "success"),
-          ],
-        ),
-      }
-    );
+    await ctx.reply("🎨 Knopka rangini tanlang:", {
+      reply_markup: kb([
+        ibtn("Ko'k", "bc:btnstyle:primary", "primary"),
+        ibtn("Yashil", "bc:btnstyle:success", "success"),
+        ibtn("Qizil", "bc:btnstyle:danger", "danger"),
+        ibtn("Random", "bc:btnstyle:random", "success"),
+      ]),
+    });
     return;
   }
 
@@ -304,7 +326,7 @@ broadcastHandler.on("message", async (ctx, next) => {
   // xabar hech qayerga tushmasdan yo'qolib ketardi.
   if (bcast.state === "compose" || bcast.state === "preview") {
     bcast.templateChatId = ctx.chat.id;
-    bcast.templateMsgId  = ctx.message.message_id;
+    bcast.templateMsgId = ctx.message.message_id;
     bcast.state = "preview";
     setBcast(ctx, bcast);
     await showPreview(ctx, bcast);
@@ -322,7 +344,7 @@ broadcastHandler.callbackQuery(/^bc:btnstyle:(primary|success|danger|random)$/, 
   if (!bcast?.pendingBtnText || !bcast.pendingBtnUrl) return;
 
   const style = resolveButtonStyle(ctx.match[1]);
-  const url   = bcast.pendingBtnUrl;
+  const url = bcast.pendingBtnUrl;
 
   const btn: InlineBtn = { text: bcast.pendingBtnText, url, style };
   delete bcast.pendingBtnText;
@@ -339,17 +361,14 @@ broadcastHandler.callbackQuery(/^bc:btnstyle:(primary|success|danger|random)$/, 
     return;
   }
 
-  await ctx.editMessageText(
-    "Yangi qatorda yoki avvalgisi bilan?",
-    {
-      reply_markup: kb(
-        [
-          ibtn("➕ Shu qatorda", `bc:btnadd:same`,  "primary"),
-          ibtn("🆕 Yangi qator", `bc:btnadd:new`,   "success"),
-        ],
-      ),
-    }
-  ).catch(() => {});
+  await ctx
+    .editMessageText("Yangi qatorda yoki avvalgisi bilan?", {
+      reply_markup: kb([
+        ibtn("➕ Shu qatorda", `bc:btnadd:same`, "primary"),
+        ibtn("🆕 Yangi qator", `bc:btnadd:new`, "success"),
+      ]),
+    })
+    .catch(() => {});
 
   // Kutilayotgan knopka bcast ichida saqlanadi — ilgari u scratch'ning ildizida
   // turardi va clearBcast uni o'chirmasdi, natijada eski knopka keyingi
@@ -395,14 +414,16 @@ async function showPreview(ctx: MyContext, bcast: BcastData) {
   // Avval shablonning o'zi
   if (bcast.templateChatId && bcast.templateMsgId) {
     const ikb = buildInlineKb(bcast.buttons);
-    const copy = await ctx.api.copyMessage(chatId, bcast.templateChatId, bcast.templateMsgId, {
-      reply_markup: ikb,
-    }).catch(() => null);
+    const copy = await ctx.api
+      .copyMessage(chatId, bcast.templateChatId, bcast.templateMsgId, {
+        reply_markup: ikb,
+      })
+      .catch(() => null);
     if (copy) bcast.previewCopyMsgId = copy.message_id;
     else {
       await ctx.reply(
         "⚠️ <b>Shablonni ko'rsatib bo'lmadi</b> — xabar o'chirilgan bo'lishi mumkin.\n" +
-        "Yuborishdan oldin xabarni qaytadan yuboring."
+          "Yuborishdan oldin xabarni qaytadan yuboring."
       );
     }
   }
@@ -410,14 +431,14 @@ async function showPreview(ctx: MyContext, bcast: BcastData) {
   const btnCount = bcast.buttons.flat().length;
   const panel = await ctx.reply(
     `👁 <b>Ko'rinish</b>\n\n` +
-    `🎯 Nishon: <b>${targetLabel(bcast)}</b>\n` +
-    `🔘 Knopkalar: <b>${btnCount}</b> ta`,
+      `🎯 Nishon: <b>${targetLabel(bcast)}</b>\n` +
+      `🔘 Knopkalar: <b>${btnCount}</b> ta`,
     {
       reply_markup: kb(
-        [ibtn("➕ Knopka qo'shish", "bc:addbtn",  "primary", BE.chAdd)],
+        [ibtn("➕ Knopka qo'shish", "bc:addbtn", "primary", BE.chAdd)],
         ...(btnCount > 0 ? [[ibtn("🗑 Barcha knopkalarni tozalash", "bc:clearbtn", "danger")]] : []),
-        [ibtn("▶️ Yuborish",  "bc:confirm", "success", BE.check)],
-        [ibtn("❌ Bekor",      "bc:menu",   "danger")],
+        [ibtn("▶️ Yuborish", "bc:confirm", "success", BE.check)],
+        [ibtn("❌ Bekor", "bc:menu", "danger")]
       ),
     }
   );
@@ -436,7 +457,10 @@ function targetLabel(bcast: BcastData): string {
 
 broadcastHandler.callbackQuery("bc:addbtn", async (ctx) => {
   const bcast = getBcast(ctx);
-  if (!bcast) { await ctx.answerCallbackQuery(); return; }
+  if (!bcast) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
   if (bcast.buttons.flat().length >= MAX_BTN_TOTAL) {
     await ctx.answerCallbackQuery({
       text: `Knopkalar soni ${MAX_BTN_TOTAL} tadan oshmasligi kerak.`,
@@ -473,10 +497,11 @@ broadcastHandler.callbackQuery("bc:confirm", async (ctx) => {
 
   const users = await getTargetUsers(bcast);
   if (users.length === 0) {
-    await ctx.editMessageText(
-      "⚠️ <b>Bu nishonda birorta ham foydalanuvchi yo'q.</b>",
-      { reply_markup: kb([ibtn("Orqaga", "bc:menu", undefined, BE.backMenu)]) }
-    ).catch(() => {});
+    await ctx
+      .editMessageText("⚠️ <b>Bu nishonda birorta ham foydalanuvchi yo'q.</b>", {
+        reply_markup: kb([ibtn("Orqaga", "bc:menu", undefined, BE.backMenu)]),
+      })
+      .catch(() => {});
     return;
   }
 
@@ -484,21 +509,23 @@ broadcastHandler.callbackQuery("bc:confirm", async (ctx) => {
   // ~20 xabar/sekund
   const mins = Math.max(1, Math.ceil(users.length / 20 / 60));
 
-  await ctx.editMessageText(
-    `⚠️ <b>Tasdiqlang</b>\n\n` +
-    `🎯 Nishon: <b>${targetLabel(bcast)}</b>\n` +
-    `👥 Qabul qiluvchilar: <b>${users.length}</b> ta\n` +
-    `🔘 Knopkalar: <b>${btnCount}</b> ta\n` +
-    `⏱ Taxminiy vaqt: <b>~${mins} daqiqa</b>\n\n` +
-    `<i>Yuborilgan xabarni qaytarib bo'lmaydi.</i>`,
-    {
-      reply_markup: kb(
-        [ibtn(`✅ Ha, ${users.length} kishiga yuborish`, "bc:send", "success", BE.check)],
-        [ibtn("⬅️ Orqaga", "bc:preview", undefined, BE.backMenu)],
-        [ibtn("❌ Bekor", "bc:menu", "danger")],
-      ),
-    }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `⚠️ <b>Tasdiqlang</b>\n\n` +
+        `🎯 Nishon: <b>${targetLabel(bcast)}</b>\n` +
+        `👥 Qabul qiluvchilar: <b>${users.length}</b> ta\n` +
+        `🔘 Knopkalar: <b>${btnCount}</b> ta\n` +
+        `⏱ Taxminiy vaqt: <b>~${mins} daqiqa</b>\n\n` +
+        `<i>Yuborilgan xabarni qaytarib bo'lmaydi.</i>`,
+      {
+        reply_markup: kb(
+          [ibtn(`✅ Ha, ${users.length} kishiga yuborish`, "bc:send", "success", BE.check)],
+          [ibtn("⬅️ Orqaga", "bc:preview", undefined, BE.backMenu)],
+          [ibtn("❌ Bekor", "bc:menu", "danger")]
+        ),
+      }
+    )
+    .catch(() => {});
 });
 
 // Tasdiqlash ekranidan ko'rinishga qaytish
@@ -520,7 +547,10 @@ broadcastHandler.callbackQuery("bc:send", async (ctx) => {
   // Qulf: webhook rejimida Telegram javob kutmay update'ni qayta yuborishi va
   // xabar ikki marta ketishi mumkin edi; ikkita parallel broadcast ham bo'lmasin.
   if (!acquireBulkLock(BULK_KEY)) {
-    await ctx.answerCallbackQuery({ text: "Hozir boshqa yuborish davom etmoqda.", show_alert: true });
+    await ctx.answerCallbackQuery({
+      text: "Hozir boshqa yuborish davom etmoqda.",
+      show_alert: true,
+    });
     return;
   }
   await ctx.answerCallbackQuery({ text: "Yuborilmoqda..." });
@@ -562,47 +592,102 @@ async function runBroadcast(
   ctx: MyContext,
   bcast: BcastData,
   chatId: number,
-  statusMsgId?: number,
+  statusMsgId?: number
 ): Promise<void> {
   try {
     const users = await getTargetUsers(bcast);
     const ikb = buildInlineKb(bcast.buttons);
 
+    // Crash-safe (3.1): birorta xabar ketishdan OLDIN "running" yozuv yaratamiz.
+    // Jarayon o'rtada qulasa ham yozuv qoladi va keyingi boot'da reconcile
+    // uni "interrupted" qilib, owner'ga retry taklifi yuboradi. DB xatosida
+    // null qaytadi — yuborish o'zi to'xtamaydi, faqat crash-himoyasi yo'qoladi.
+    let jobId: number | null = null;
+    try {
+      jobId = await createBroadcastJob({
+        targetType: bcast.target.type,
+        targetExtra: JSON.stringify(bcast.target),
+        total: users.length,
+        templateChatId: bcast.templateChatId ? BigInt(bcast.templateChatId) : null,
+        templateMsgId: bcast.templateMsgId ?? null,
+        buttonsJson: bcast.buttons.length ? JSON.stringify(bcast.buttons) : null,
+      });
+    } catch (e) {
+      log("error", "Broadcast job yaratilmadi (crash-safety yo'q)", { error: String(e) });
+    }
+
     const cancelKb = kb([ibtn("⛔️ To'xtatish", "bc:stop", "danger")]);
     const setStatus = async (text: string, markup?: ReturnType<typeof kb>) => {
       if (!statusMsgId) return;
-      await ctx.api.editMessageText(chatId, statusMsgId, text, { reply_markup: markup }).catch(() => {});
+      await ctx.api
+        .editMessageText(chatId, statusMsgId, text, { reply_markup: markup })
+        .catch(() => {});
     };
 
     await setStatus(`⏳ Yuborilmoqda: 0 / ${users.length}...`, cancelKb);
 
     const startedAt = Date.now();
+    // Job progress DB'ga har ~5 soniyada yoziladi (har progress chaqiruvida emas)
+    let lastJobWrite = 0;
     const result = await bulkSend({
       userIds: users,
       send: (uid) =>
-        ctx.api.copyMessage(uid, bcast.templateChatId!, bcast.templateMsgId!, { reply_markup: ikb }),
+        ctx.api.copyMessage(uid, bcast.templateChatId!, bcast.templateMsgId!, {
+          reply_markup: ikb,
+        }),
       isCancelled: () => isBulkCancelled(BULK_KEY),
       onProgress: async (r) => {
         if (r.processed >= r.total) return;
         await setStatus(progressText(r, startedAt), cancelKb);
+        if (jobId && Date.now() - lastJobWrite >= 5000) {
+          lastJobWrite = Date.now();
+          await updateBroadcastJob(jobId, {
+            processed: r.processed,
+            sentCount: r.sent,
+            failCount: r.failed,
+            blockedCount: r.blocked,
+          });
+        }
       },
     });
 
-    // Tarixga yozamiz — shablon va xato bo'lganlar bilan (qayta yuborish uchun)
-    const record = await saveBroadcastRecord(bcast, result);
+    // Yakuniy natijani SHU job yozuviga yozamiz (tarix + qayta yuborish ma'lumoti).
+    // Job bo'lmasa (DB xatosi) eski usul — alohida yozuv.
+    let record: { id: number } | null = null;
+    if (jobId) {
+      await updateBroadcastJob(jobId, {
+        processed: result.processed,
+        sentCount: result.sent,
+        failCount: result.failed,
+        blockedCount: result.blocked,
+        status: result.aborted ? "aborted" : "completed",
+        abortReason: result.aborted ? (result.abortReason ?? "to'xtatildi") : null,
+        templateChatId: bcast.templateChatId ? BigInt(bcast.templateChatId) : null,
+        templateMsgId: bcast.templateMsgId ?? null,
+        buttonsJson: bcast.buttons.length ? JSON.stringify(bcast.buttons) : null,
+        failedIds: result.failedIds.length ? JSON.stringify(result.failedIds.map(String)) : null,
+      });
+      record = { id: jobId };
+    } else {
+      record = await saveBroadcastRecord(bcast, result);
+    }
 
     const rows = [[ibtn("Menyuga", "bc:menu", "primary", BE.backMenu)]];
     if (record && result.failedIds.length > 0) {
       rows.unshift([
-        ibtn(`🔁 Xato bo'lganlarga qayta yuborish (${result.failedIds.length})`, `bc:retry:${record.id}`, "primary"),
+        ibtn(
+          `🔁 Xato bo'lganlarga qayta yuborish (${result.failedIds.length})`,
+          `bc:retry:${record.id}`,
+          "primary"
+        ),
       ]);
     }
 
     await setStatus(
       `${ce("check")} <b>Xabar yuborish tugadi!</b>\n\n` +
-      `🎯 Nishon: <b>${targetLabel(bcast)}</b>\n` +
-      `${formatBulkResult(result)}`,
-      kb(...rows),
+        `🎯 Nishon: <b>${targetLabel(bcast)}</b>\n` +
+        `${formatBulkResult(result)}`,
+      kb(...rows)
     );
   } catch (err) {
     console.error("🛑 Broadcast xatosi:", err);
@@ -614,20 +699,22 @@ async function runBroadcast(
 
 /** Yuborish natijasini tarixga yozadi (qayta yuborish uchun shablon bilan) */
 async function saveBroadcastRecord(bcast: BcastData, result: BulkResult) {
-  return prisma.broadcast.create({
-    data: {
-      targetType: bcast.target.type,
-      targetExtra: JSON.stringify(bcast.target),
-      sentCount: result.sent,
-      failCount: result.failed,
-      blockedCount: result.blocked,
-      abortReason: result.aborted ? (result.abortReason ?? "to'xtatildi") : null,
-      templateChatId: bcast.templateChatId ? BigInt(bcast.templateChatId) : null,
-      templateMsgId: bcast.templateMsgId ?? null,
-      buttonsJson: bcast.buttons.length ? JSON.stringify(bcast.buttons) : null,
-      failedIds: result.failedIds.length ? JSON.stringify(result.failedIds.map(String)) : null,
-    },
-  }).catch(() => null);
+  return prisma.broadcast
+    .create({
+      data: {
+        targetType: bcast.target.type,
+        targetExtra: JSON.stringify(bcast.target),
+        sentCount: result.sent,
+        failCount: result.failed,
+        blockedCount: result.blocked,
+        abortReason: result.aborted ? (result.abortReason ?? "to'xtatildi") : null,
+        templateChatId: bcast.templateChatId ? BigInt(bcast.templateChatId) : null,
+        templateMsgId: bcast.templateMsgId ?? null,
+        buttonsJson: bcast.buttons.length ? JSON.stringify(bcast.buttons) : null,
+        failedIds: result.failedIds.length ? JSON.stringify(result.failedIds.map(String)) : null,
+      },
+    })
+    .catch(() => null);
 }
 
 // ─── Tarix ───────────────────────────────────────────────────────────────────
@@ -657,7 +744,10 @@ function parseButtons(json: string | null): InlineBtn[][] {
 }
 
 function targetTypeLabel(type: string): string {
-  return { all: "Hammaga", daterange: "Sana oralig'i", region: "Viloyat", funnel: "Funnel" }[type] ?? type;
+  return (
+    { all: "Hammaga", daterange: "Sana oralig'i", region: "Viloyat", funnel: "Funnel" }[type] ??
+    type
+  );
 }
 
 broadcastHandler.callbackQuery(/^bc:history:(\d+)$/, async (ctx) => {
@@ -675,13 +765,18 @@ broadcastHandler.callbackQuery(/^bc:history:(\d+)$/, async (ctx) => {
     take: HISTORY_PAGE,
   });
 
-  const rows = items.map((b) => [
-    ibtn(
-      `${b.abortReason ? "⛔️" : "✅"} ${formatUzDateTime(b.createdAt)} · ${b.sentCount} ta`,
-      `bc:hist:${b.id}`,
-      "primary",
-    ),
-  ]);
+  // Status ikonkasi: interrupted job "✅" ko'rinmasligi kerak (crash'dan qolgan)
+  const rows = items.map((b) => {
+    const icon =
+      b.status === "interrupted" ? "🟠" : b.status === "aborted" || b.abortReason ? "⛔️" : "✅";
+    return [
+      ibtn(
+        `${icon} ${formatUzDateTime(b.createdAt)} · ${b.sentCount} ta`,
+        `bc:hist:${b.id}`,
+        "primary"
+      ),
+    ];
+  });
 
   const pages = Math.max(1, Math.ceil(total / HISTORY_PAGE));
   const nav: ReturnType<typeof ibtn>[] = [];
@@ -691,17 +786,22 @@ broadcastHandler.callbackQuery(/^bc:history:(\d+)$/, async (ctx) => {
   if (nav.length) rows.push(nav);
   rows.push([ibtn("Orqaga", "bc:menu", undefined, BE.backMenu)]);
 
-  await ctx.editMessageText(
-    `🗂 <b>Yuborishlar tarixi</b> (${total})\n\n<i>Batafsil ko'rish uchun tanlang.</i>`,
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `🗂 <b>Yuborishlar tarixi</b> (${total})\n\n<i>Batafsil ko'rish uchun tanlang.</i>`,
+      { reply_markup: kb(...rows) }
+    )
+    .catch(() => {});
 });
 
 broadcastHandler.callbackQuery("bc:noop", (ctx) => ctx.answerCallbackQuery());
 
 broadcastHandler.callbackQuery(/^bc:hist:(\d+)$/, async (ctx) => {
   const b = await prisma.broadcast.findUnique({ where: { id: Number(ctx.match[1]) } });
-  if (!b) { await ctx.answerCallbackQuery({ text: "Topilmadi.", show_alert: true }); return; }
+  if (!b) {
+    await ctx.answerCallbackQuery({ text: "Topilmadi.", show_alert: true });
+    return;
+  }
   await ctx.answerCallbackQuery();
 
   let targetText = targetTypeLabel(b.targetType);
@@ -709,18 +809,31 @@ broadcastHandler.callbackQuery(/^bc:hist:(\d+)$/, async (ctx) => {
     const t = JSON.parse(b.targetExtra ?? "{}");
     if (t.region) targetText += `: ${t.region}`;
     if (t.dateFrom && t.dateTo) targetText += `: ${t.dateFrom} – ${t.dateTo}`;
-  } catch { /* eski yozuvlar boshqa formatda bo'lishi mumkin */ }
+  } catch {
+    /* eski yozuvlar boshqa formatda bo'lishi mumkin */
+  }
 
   const failedIds = parseIdList(b.failedIds);
   const canRetry = failedIds.length > 0 && b.templateChatId != null && b.templateMsgId != null;
 
+  // Interrupted job'lar finalize qilinmagan — sentCount/blockedCount/failCount
+  // 0 qoladi va chalg'itadi. Status belgisi + interrupted uchun processed ko'rsatiladi.
+  const statusBadge =
+    b.status === "interrupted"
+      ? `🟠 <b>Interrupted</b> — jarayon o'rtasida to'xtadi`
+      : b.status === "aborted"
+        ? `⛔️ <b>To'xtatilgan</b>`
+        : `✅ <b>Yakunlangan</b>`;
+
   const text =
-    `🗂 <b>Yuborish #${b.id}</b>\n\n` +
+    `🗂 <b>Yuborish #${b.id}</b> · ${statusBadge}\n\n` +
     `📅 Sana: <b>${formatUzDateTime(b.createdAt)}</b>\n` +
     `🎯 Nishon: <b>${e.escapeHtml(targetText)}</b>\n` +
-    `✅ Yuborildi: <b>${b.sentCount}</b>\n` +
-    `🚫 Bloklagan/o'chirgan: <b>${b.blockedCount}</b>\n` +
-    `⚠️ Vaqtinchalik xato: <b>${b.failCount}</b>\n` +
+    (b.status === "interrupted"
+      ? `⏳ Ishlandi: <b>${b.processed}</b> / ${b.total}\n`
+      : `✅ Yuborildi: <b>${b.sentCount}</b>\n` +
+        `🚫 Bloklagan/o'chirgan: <b>${b.blockedCount}</b>\n` +
+        `⚠️ Vaqtinchalik xato: <b>${b.failCount}</b>\n`) +
     (b.abortReason ? `\n⛔️ <b>To'xtatilgan:</b> ${e.escapeHtml(b.abortReason)}\n` : "") +
     (failedIds.length > 0
       ? `\n<i>${failedIds.length} ta foydalanuvchiga qayta yuborish mumkin.</i>`
@@ -743,11 +856,17 @@ broadcastHandler.callbackQuery(/^bc:retry:(\d+)$/, async (ctx) => {
   const b = await prisma.broadcast.findUnique({ where: { id: Number(ctx.match[1]) } });
   const idStrings = parseIdList(b?.failedIds ?? null);
   if (!b || idStrings.length === 0 || b.templateChatId == null || b.templateMsgId == null) {
-    await ctx.answerCallbackQuery({ text: "Qayta yuborish uchun ma'lumot yo'q.", show_alert: true });
+    await ctx.answerCallbackQuery({
+      text: "Qayta yuborish uchun ma'lumot yo'q.",
+      show_alert: true,
+    });
     return;
   }
   if (!acquireBulkLock(BULK_KEY)) {
-    await ctx.answerCallbackQuery({ text: "Hozir boshqa yuborish davom etmoqda.", show_alert: true });
+    await ctx.answerCallbackQuery({
+      text: "Hozir boshqa yuborish davom etmoqda.",
+      show_alert: true,
+    });
     return;
   }
   await ctx.answerCallbackQuery({ text: "Qayta yuborilmoqda..." });
@@ -758,48 +877,100 @@ broadcastHandler.callbackQuery(/^bc:retry:(\d+)$/, async (ctx) => {
   const statusMsgId = ctx.callbackQuery.message?.message_id;
 
   void (async () => {
+    // Crash-safe (3.1): qayta yuborish ham "running" job sifatida yoziladi.
+    let jobId: number | null = null;
+    try {
+      jobId = await createBroadcastJob({
+        targetType: b.targetType,
+        targetExtra: b.targetExtra,
+        total: ids.length,
+        templateChatId: b.templateChatId,
+        templateMsgId: b.templateMsgId,
+        buttonsJson: b.buttonsJson,
+      });
+    } catch (e) {
+      log("error", "Retry job yaratilmadi (crash-safety yo'q)", { error: String(e) });
+    }
+
     try {
       const setStatus = async (text: string, markup?: ReturnType<typeof kb>) => {
         if (!statusMsgId) return;
-        await ctx.api.editMessageText(chatId, statusMsgId, text, { reply_markup: markup }).catch(() => {});
+        await ctx.api
+          .editMessageText(chatId, statusMsgId, text, { reply_markup: markup })
+          .catch(() => {});
       };
-      await setStatus(`🔁 Qayta yuborilmoqda: 0 / ${ids.length}...`, kb([ibtn("⛔️ To'xtatish", "bc:stop", "danger")]));
+      await setStatus(
+        `🔁 Qayta yuborilmoqda: 0 / ${ids.length}...`,
+        kb([ibtn("⛔️ To'xtatish", "bc:stop", "danger")])
+      );
 
       const startedAt = Date.now();
       const result = await bulkSend({
         userIds: ids,
         send: (uid) =>
-          ctx.api.copyMessage(uid, Number(b.templateChatId), b.templateMsgId!, { reply_markup: ikb }),
+          ctx.api.copyMessage(uid, Number(b.templateChatId), b.templateMsgId!, {
+            reply_markup: ikb,
+          }),
         isCancelled: () => isBulkCancelled(BULK_KEY),
         onProgress: async (r) => {
           if (r.processed >= r.total) return;
           await setStatus(`🔁 ${progressText(r, startedAt)}`);
+          if (jobId) {
+            await updateBroadcastJob(jobId, {
+              processed: r.processed,
+              sentCount: r.sent,
+              failCount: r.failed,
+              blockedCount: r.blocked,
+            });
+          }
         },
       });
 
       // Yangi natijani yozib, eski yozuvdagi xatolar ro'yxatini yopamiz
-      await prisma.broadcast.update({
-        where: { id: b.id },
-        data: { failedIds: null },
-      }).catch(() => null);
-      await prisma.broadcast.create({
-        data: {
-          targetType: b.targetType,
-          targetExtra: b.targetExtra,
+      await prisma.broadcast
+        .update({
+          where: { id: b.id },
+          data: { failedIds: null },
+        })
+        .catch(() => null);
+
+      if (jobId) {
+        await updateBroadcastJob(jobId, {
+          processed: result.processed,
           sentCount: result.sent,
           failCount: result.failed,
           blockedCount: result.blocked,
+          status: result.aborted ? "aborted" : "completed",
           abortReason: result.aborted ? (result.abortReason ?? "to'xtatildi") : null,
           templateChatId: b.templateChatId,
           templateMsgId: b.templateMsgId,
           buttonsJson: b.buttonsJson,
           failedIds: result.failedIds.length ? JSON.stringify(result.failedIds.map(String)) : null,
-        },
-      }).catch(() => null);
+        });
+      } else {
+        await prisma.broadcast
+          .create({
+            data: {
+              targetType: b.targetType,
+              targetExtra: b.targetExtra,
+              sentCount: result.sent,
+              failCount: result.failed,
+              blockedCount: result.blocked,
+              abortReason: result.aborted ? (result.abortReason ?? "to'xtatildi") : null,
+              templateChatId: b.templateChatId,
+              templateMsgId: b.templateMsgId,
+              buttonsJson: b.buttonsJson,
+              failedIds: result.failedIds.length
+                ? JSON.stringify(result.failedIds.map(String))
+                : null,
+            },
+          })
+          .catch(() => null);
+      }
 
       await setStatus(
         `${ce("check")} <b>Qayta yuborish tugadi!</b>\n\n${formatBulkResult(result)}`,
-        kb([ibtn("Tarixga", "bc:history:0", "primary", BE.backMenu)]),
+        kb([ibtn("Tarixga", "bc:history:0", "primary", BE.backMenu)])
       );
     } catch (err) {
       console.error("🛑 Qayta yuborish xatosi:", err);
@@ -829,28 +1000,37 @@ broadcastHandler.callbackQuery("bc:unblock", async (ctx) => {
     return;
   }
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(
-    `♻️ <b>Bloklanganlar ro'yxatini tiklash</b>\n\n` +
-    `Hozir <b>${count}</b> ta foydalanuvchi "bloklagan" deb belgilangan.\n\n` +
-    `<i>Ular orasida tarmoq xatosi tufayli noto'g'ri belgilanganlari ham bor. ` +
-    `Tiklasangiz keyingi yuborishda haqiqatan bloklaganlar qaytadan aniqlanadi — ` +
-    `bir martalik qo'shimcha yuklama, lekin ro'yxat to'g'rilanadi.</i>`,
-    {
-      reply_markup: kb(
-        [ibtn(`♻️ Ha, ${count} tasini tiklash`, "bc:unblock:yes", "success")],
-        [ibtn("❌ Bekor", "bc:menu", "danger")],
-      ),
-    }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `♻️ <b>Bloklanganlar ro'yxatini tiklash</b>\n\n` +
+        `Hozir <b>${count}</b> ta foydalanuvchi "bloklagan" deb belgilangan.\n\n` +
+        `<i>Ular orasida tarmoq xatosi tufayli noto'g'ri belgilanganlari ham bor. ` +
+        `Tiklasangiz keyingi yuborishda haqiqatan bloklaganlar qaytadan aniqlanadi — ` +
+        `bir martalik qo'shimcha yuklama, lekin ro'yxat to'g'rilanadi.</i>`,
+      {
+        reply_markup: kb(
+          [ibtn(`♻️ Ha, ${count} tasini tiklash`, "bc:unblock:yes", "success")],
+          [ibtn("❌ Bekor", "bc:menu", "danger")]
+        ),
+      }
+    )
+    .catch(() => {});
 });
 
 broadcastHandler.callbackQuery("bc:unblock:yes", async (ctx) => {
-  const res = await prisma.user.updateMany({ where: { isBlocked: true }, data: { isBlocked: false } });
-  await ctx.answerCallbackQuery({ text: `♻️ ${res.count} ta foydalanuvchi tiklandi.`, show_alert: true });
-  await ctx.editMessageText(
-    `${ce("check")} <b>${res.count}</b> ta foydalanuvchi ro'yxatga qaytarildi.`,
-    { reply_markup: kb([ibtn("Menyuga", "bc:menu", "primary", BE.backMenu)]) }
-  ).catch(() => {});
+  const res = await prisma.user.updateMany({
+    where: { isBlocked: true },
+    data: { isBlocked: false },
+  });
+  await ctx.answerCallbackQuery({
+    text: `♻️ ${res.count} ta foydalanuvchi tiklandi.`,
+    show_alert: true,
+  });
+  await ctx
+    .editMessageText(`${ce("check")} <b>${res.count}</b> ta foydalanuvchi ro'yxatga qaytarildi.`, {
+      reply_markup: kb([ibtn("Menyuga", "bc:menu", "primary", BE.backMenu)]),
+    })
+    .catch(() => {});
 });
 
 async function getTargetUsers(bcast: BcastData): Promise<bigint[]> {

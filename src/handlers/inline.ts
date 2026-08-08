@@ -3,13 +3,15 @@ import type { InlineQueryResult } from "grammy/types";
 import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { movieCaption } from "../services/media.js";
-import { getGlobalButton, getBool, getSetting, KEYS } from "../utils/settings.js";
+import { getGlobalButton, getBool, KEYS } from "../utils/settings.js";
 import { contentButtonRow } from "../utils/contentButton.js";
 import { getUnsubscribedChannels } from "../utils/subscription.js";
 import { countContentRequest, isFreeQuotaExhausted } from "../utils/access.js";
 import { isPremiumActive } from "../utils/premium.js";
+import { searchContent } from "../services/search.js";
 import { e } from "../utils/emoji.js";
 import type { MyContext } from "../types.js";
+import type { Movie } from "@prisma/client";
 
 export const inlineHandler = new Composer<MyContext>();
 
@@ -56,7 +58,7 @@ inlineHandler.on("inline_query", async (ctx) => {
   }
 
   const admin = isAdmin(uid);
-  const user  = admin ? null : await prisma.user.findUnique({ where: { id: BigInt(uid) } });
+  const user = admin ? null : await prisma.user.findUnique({ where: { id: BigInt(uid) } });
   const premium = admin || isPremiumActive(user?.premiumUntil);
 
   // Majburiy obuna — boshqa chatlarda ham tekshiriladi (video "sizib chiqmasin").
@@ -65,7 +67,7 @@ inlineHandler.on("inline_query", async (ctx) => {
     const forceSub = await getBool(KEYS.forceSubEnabled, true);
     if (forceSub) {
       const notJoined = await getUnsubscribedChannels(ctx, uid);
-      const blocking  = notJoined.filter((c) => c.type !== "INSTAGRAM");
+      const blocking = notJoined.filter((c) => c.type !== "INSTAGRAM");
       if (blocking.length > 0) {
         await ctx.answerInlineQuery([], {
           cache_time: 0,
@@ -93,25 +95,37 @@ inlineHandler.on("inline_query", async (ctx) => {
     }
   }
 
-  const search = q
-    ? /^\d+$/.test(q)
-      ? { code: Number(q) }
-      : { title: { contains: q, mode: "insensitive" as const } }
-    : {};
-
   // TESHIK YOPILDI: ilgari bu yerda isPremium filtri yo'q edi va oddiy
   // foydalanuvchi inline orqali istalgan premium kinoni bepul olardi.
-  const where = premium ? search : { ...search, isPremium: false };
+  const premiumFilter = premium ? {} : { isPremium: false as const };
 
-  const movies = await prisma.movie.findMany({
-    where,
-    take: 25,
-    orderBy: { views: "desc" },
-  });
+  // Aqlli qidiruv (titleNorm + pg_trgm): kirill/lotin bir xil natija beradi.
+  let movies: Movie[];
+  if (/^\d+$/.test(q)) {
+    movies = await prisma.movie.findMany({
+      where: { ...premiumFilter, code: Number(q) },
+      take: 25,
+      orderBy: { views: "desc" },
+    });
+  } else if (q) {
+    const hits = (await searchContent(q, 25)).filter((h) => h.kind === "movie");
+    const ids = hits.map((h) => h.id);
+    const found = ids.length
+      ? await prisma.movie.findMany({ where: { ...premiumFilter, id: { in: ids } } })
+      : [];
+    const byId = new Map(found.map((m) => [m.id, m]));
+    movies = hits.map((h) => byId.get(h.id)).filter((m): m is Movie => !!m);
+  } else {
+    movies = await prisma.movie.findMany({
+      where: premiumFilter,
+      take: 25,
+      orderBy: { views: "desc" },
+    });
+  }
 
-  const enabled   = await getBool(KEYS.movieBtnEnabled, true);
+  const enabled = await getBool(KEYS.movieBtnEnabled, true);
   const globalBtn = enabled ? await getGlobalButton("movie") : null;
-  const btnRow    = globalBtn ? contentButtonRow(globalBtn) : null;
+  const btnRow = globalBtn ? contentButtonRow(globalBtn) : null;
 
   const results: InlineQueryResult[] = movies.map((m) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,12 +135,9 @@ inlineHandler.on("inline_query", async (ctx) => {
       id: `m${m.id}`,
       video_file_id: m.fileId,
       title: `${m.title} (${m.code})`,
-      description: [
-        m.year ? `${m.year}` : null,
-        m.genre,
-        m.quality,
-        `Ko'rishlar: ${m.views}`,
-      ].filter(Boolean).join(" · "),
+      description: [m.year ? `${m.year}` : null, m.genre, m.quality, `Ko'rishlar: ${m.views}`]
+        .filter(Boolean)
+        .join(" · "),
       caption: movieCaption(m),
       parse_mode: "HTML",
       reply_markup: reply_markup.inline_keyboard.length ? reply_markup : undefined,

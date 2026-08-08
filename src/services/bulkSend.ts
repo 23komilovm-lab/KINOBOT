@@ -6,12 +6,12 @@ import { prisma } from "../prisma.js";
 // broadcast.ts, funnel.ts, aiAdmin.ts va premiumExpiry.ts shu yerdan foydalanadi.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MIN_INTERVAL_MS = 50;          // ~20 xabar/sekund (Telegram amaliy chegarasi ~30)
-const PROGRESS_INTERVAL_MS = 4_000;  // holat xabari shu oraliqda yangilanadi (~15 tahrir/daqiqa)
-const MAX_ATTEMPTS = 3;              // vaqtinchalik xatolar uchun urinishlar soni
-const MAX_RETRY_AFTER_S = 60;        // 429 dagi retry_after uchun yuqori chegara
-const ABORT_AFTER_CONSECUTIVE = 25;  // ketma-ket shuncha "vaqtinchalik" xato bo'lsa to'xtaymiz
-const BLOCKED_FLUSH = 500;           // bloklanganlarni shuncha to'planganda bazaga yozamiz
+const MIN_INTERVAL_MS = 50; // ~20 xabar/sekund (Telegram amaliy chegarasi ~30)
+const PROGRESS_INTERVAL_MS = 4_000; // holat xabari shu oraliqda yangilanadi (~15 tahrir/daqiqa)
+const MAX_ATTEMPTS = 3; // vaqtinchalik xatolar uchun urinishlar soni
+const MAX_RETRY_AFTER_S = 60; // 429 dagi retry_after uchun yuqori chegara
+const ABORT_AFTER_CONSECUTIVE = 25; // ketma-ket shuncha "vaqtinchalik" xato bo'lsa to'xtaymiz
+const BLOCKED_FLUSH = 500; // bloklanganlarni shuncha to'planganda bazaga yozamiz
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -81,8 +81,8 @@ export interface BulkResult {
   total: number;
   processed: number;
   sent: number;
-  blocked: number;   // haqiqatan yetkazib bo'lmadi — isBlocked qilindi
-  failed: number;    // vaqtinchalik xato, keyingi safar qayta urinsa bo'ladi
+  blocked: number; // haqiqatan yetkazib bo'lmadi — isBlocked qilindi
+  failed: number; // vaqtinchalik xato, keyingi safar qayta urinsa bo'ladi
   /** Vaqtinchalik xato bo'lganlar (qayta yuborish uchun; MAX_FAILED_IDS bilan cheklangan) */
   failedIds: bigint[];
   aborted: boolean;
@@ -222,10 +222,7 @@ export async function bulkSend(opts: BulkOptions): Promise<BulkResult> {
 
 /** Yakuniy hisobot matni (HTML) */
 export function formatBulkResult(r: BulkResult): string {
-  const lines = [
-    `✅ Yuborildi: <b>${r.sent}</b>`,
-    `🚫 Bloklagan/o'chirgan: <b>${r.blocked}</b>`,
-  ];
+  const lines = [`✅ Yuborildi: <b>${r.sent}</b>`, `🚫 Bloklagan/o'chirgan: <b>${r.blocked}</b>`];
   if (r.failed > 0) lines.push(`⚠️ Vaqtinchalik xato: <b>${r.failed}</b>`);
   if (r.aborted) {
     lines.push(``, `⛔️ <b>To'xtatildi:</b> ${r.abortReason}`);

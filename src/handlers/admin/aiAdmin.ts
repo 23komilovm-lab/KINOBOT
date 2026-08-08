@@ -3,10 +3,29 @@ import { prisma } from "../../prisma.js";
 import { adminCan } from "../../config.js";
 import { e } from "../../utils/emoji.js";
 import { ibtn, kb, aiActiveKeyboard, adminMenuKeyboard } from "../../utils/keyboard.js";
-import { aiEnabled, askAIChat, lastFailureWasRateLimited, type ChatMsg } from "../../services/ai.js";
-import { AI_CONTROLLABLE, findControllable, applyControllable, getSetting } from "../../utils/settings.js";
+import {
+  aiEnabled,
+  askAIChat,
+  lastFailureWasRateLimited,
+  type ChatMsg,
+} from "../../services/ai.js";
+import {
+  AI_CONTROLLABLE,
+  findControllable,
+  applyControllable,
+  getSetting,
+} from "../../utils/settings.js";
 import { summarizeGender } from "../../utils/gender.js";
-import { acquireBulkLock, bulkSend, formatBulkResult, releaseBulkLock } from "../../services/bulkSend.js";
+import {
+  acquireBulkLock,
+  bulkSend,
+  formatBulkResult,
+  releaseBulkLock,
+} from "../../services/bulkSend.js";
+import { createBroadcastJob, updateBroadcastJob } from "../../services/broadcastJob.js";
+import { getCachedStat } from "../../services/statsCache.js";
+import { todayUz, dayStartUz, uzDayKey } from "../../utils/dateRange.js";
+import { log, formatError } from "../../utils/logger.js";
 import type { MyContext } from "../../types.js";
 
 export const aiAdminHandler = new Composer<MyContext>();
@@ -14,27 +33,37 @@ export const aiAdminHandler = new Composer<MyContext>();
 /** broadcast.ts bilan bir xil qulf — bir vaqtda bitta ommaviy yuborish */
 const BULK_KEY = "broadcast";
 
-const AI_BTN  = "AI yordamchi";
+const AI_BTN = "AI yordamchi";
 const AI_EXIT = "❌ Chiqish";
 
+/** Toshkent vaqti bo'yicha bugun boshlanishi — server UTC bo'lsa ham kun 00:00 UZT dan hisoblanadi. */
 function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const [y, m, d] = todayUz().split("-").map(Number);
+  return dayStartUz({ y, m, d });
 }
 
 /** Jonli bot statistikasi — admin AI kontekstiga uzatiladi */
 async function buildAdminStats(): Promise<string> {
   const today = startOfToday();
-  const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 6);
+  const weekAgo = new Date(today);
+  weekAgo.setDate(weekAgo.getDate() - 6);
   const [
-    totalUsers, blockedUsers, todayUsers, weekUsers,
-    totalMovies, todayMovies, moviesNoGenre,
+    totalUsers,
+    blockedUsers,
+    todayUsers,
+    weekUsers,
+    totalMovies,
+    todayMovies,
+    moviesNoGenre,
     totalSerials,
-    totalChannels, activeChannels, inactiveChannels,
+    totalChannels,
+    activeChannels,
+    inactiveChannels,
     totalReferrals,
-    premiumUsers, totalAdmins,
-    allFirstNames, regionGroups,
+    premiumUsers,
+    totalAdmins,
+    allFirstNames,
+    regionGroups,
     weekJoinUsers,
   ] = await Promise.all([
     prisma.user.count(),
@@ -43,7 +72,11 @@ async function buildAdminStats(): Promise<string> {
     prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
     prisma.movie.count(),
     prisma.movie.count({ where: { createdAt: { gte: today } } }),
-    prisma.movie.findMany({ where: { genre: null }, select: { code: true, title: true }, take: 15 }),
+    prisma.movie.findMany({
+      where: { genre: null },
+      select: { code: true, title: true },
+      take: 15,
+    }),
     prisma.serial.count(),
     prisma.channel.count(),
     prisma.channel.count({ where: { isActive: true } }),
@@ -51,11 +84,19 @@ async function buildAdminStats(): Promise<string> {
     prisma.user.count({ where: { referralConfirmed: true } }),
     prisma.user.count({ where: { premiumUntil: { gt: new Date() } } }),
     prisma.user.count({ where: { isAdmin: true } }),
-    prisma.user.findMany({ select: { firstName: true } }),
-    prisma.user.groupBy({ by: ["region"], where: { region: { not: null } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    // Jins TAXMINIY (ismga qarab) — barcha userlarni yuklash shart emas, 5000
+    // namuna statistika uchun yetarli (3.5: all-user findMany o'rniga namuna).
+    prisma.user.findMany({ select: { firstName: true }, take: 5000 }),
+    prisma.user.groupBy({
+      by: ["region"],
+      where: { region: { not: null } },
+      _count: { id: true },
+      orderBy: { _count: { id: "desc" } },
+    }),
     prisma.user.findMany({ where: { createdAt: { gte: weekAgo } }, select: { createdAt: true } }),
   ]);
 
+  // Top referrerlar — N+1 yo'q: id'larni bitta findMany bilan yuklaymiz.
   const topRefRaw = await prisma.user.groupBy({
     by: ["referredById"],
     where: { referredById: { not: null }, referralConfirmed: true },
@@ -63,23 +104,30 @@ async function buildAdminStats(): Promise<string> {
     orderBy: { _count: { id: "desc" } },
     take: 5,
   });
-  const topReferrers: string[] = [];
-  for (const g of topRefRaw) {
-    const u = await prisma.user.findUnique({ where: { id: g.referredById! } });
+  const topRefIds = topRefRaw.map((g) => g.referredById!).filter((id): id is bigint => id !== null);
+  const refUsers = topRefIds.length
+    ? await prisma.user.findMany({ where: { id: { in: topRefIds } } })
+    : [];
+  const refByName = new Map(refUsers.map((u) => [u.id, u]));
+  const topReferrers: string[] = topRefRaw.map((g) => {
+    const u = refByName.get(g.referredById!);
     const name = u?.firstName || (u?.username ? `@${u.username}` : `ID ${g.referredById}`);
-    topReferrers.push(`${name} — ${g._count.id} ta`);
-  }
+    return `${name} — ${g._count.id} ta`;
+  });
 
   const gender = summarizeGender(allFirstNames.map((u) => u.firstName));
 
-  // Oxirgi 7 kun bo'yicha kunlik qo'shilishlar
+  // Oxirgi 7 kun bo'yicha kunlik qo'shilishlar — UTC kuni emas, Toshkent kuni
+  // (kechki soatlarda qo'shilganlar oldingi kunga tushib ketmasligi uchun)
   const dayCounts = new Map<string, number>();
   for (const u of weekJoinUsers) {
-    const key = u.createdAt.toISOString().slice(0, 10);
+    const key = uzDayKey(u.createdAt);
     dayCounts.set(key, (dayCounts.get(key) ?? 0) + 1);
   }
-  const weekTrend = [...dayCounts.entries()].sort(([a], [b]) => a.localeCompare(b))
-    .map(([day, count]) => `${day}: ${count} ta`).join(", ");
+  const weekTrend = [...dayCounts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, count]) => `${day}: ${count} ta`)
+    .join(", ");
 
   const lines = [
     `Foydalanuvchilar: ${totalUsers} (bloklangan: ${blockedUsers}, bugun qo'shilgan: ${todayUsers}, oxirgi 7 kunda: ${weekUsers})`,
@@ -92,12 +140,18 @@ async function buildAdminStats(): Promise<string> {
     `Tasdiqlangan referallar: ${totalReferrals}`,
   ];
   if (regionGroups.length) {
-    lines.push(`Hududlar bo'yicha:\n  - ${regionGroups.map((g) => `${g.region} — ${g._count.id} ta`).join("\n  - ")}`);
+    lines.push(
+      `Hududlar bo'yicha:\n  - ${regionGroups.map((g) => `${g.region} — ${g._count.id} ta`).join("\n  - ")}`
+    );
   }
   if (weekTrend) lines.push(`Oxirgi 7 kunlik qo'shilish tendensiyasi: ${weekTrend}`);
   if (topReferrers.length) lines.push(`Top referrerlar:\n  - ${topReferrers.join("\n  - ")}`);
-  if (moviesNoGenre.length) lines.push(`Janrsiz kinolar: ${moviesNoGenre.map((m) => `${m.title} (m${m.code})`).join(", ")}`);
-  if (inactiveChannels.length) lines.push(`Nofaol kanallar: ${inactiveChannels.map((c) => c.title).join(", ")}`);
+  if (moviesNoGenre.length)
+    lines.push(
+      `Janrsiz kinolar: ${moviesNoGenre.map((m) => `${m.title} (m${m.code})`).join(", ")}`
+    );
+  if (inactiveChannels.length)
+    lines.push(`Nofaol kanallar: ${inactiveChannels.map((c) => c.title).join(", ")}`);
 
   return lines.join("\n");
 }
@@ -114,22 +168,17 @@ function adminSystemPrompt(stats: string, userInfo: string): string {
     `Sen — "🎬 Kino vaqti" botining ADMIN uchun shaxsiy AI yordamchisisan. Bu yerda cheklovlar yo'q — ` +
     `admin bilan ochiq, erkin va samimiy suhbatlashasan: savollariga to'liq javob berasan, xato yoki ` +
     `kamchiliklarini topib tuzatib berasan, tavsiyalar berasan.\n\n` +
-
     `━━━ ADMIN ━━━\n${userInfo}\nUni ismi bilan chaqir.\n\n` +
-
     `━━━ TIL ━━━\n` +
     `Admin qaysi tilda va alifboda yozsa (o'zbek lotin/kirill, rus, ingliz va h.k.), sen ham aynan ` +
     `o'shanda javob ber.\n\n` +
-
     `━━━ USLUB ━━━\n` +
     `HTML teglar (<b>,<i>,<code>) va mos emojilar bilan chiroyli, tushunarli javob ber. Markdown ISHLATMA.\n\n` +
-
     `━━━ JONLI BOT STATISTIKASI ━━━\n${stats}\n` +
     `Admin statistika, foydalanuvchilar (jins, hudud, premium, qo'shilish tendensiyasi), ` +
     `kino/kanal boshqaruvi haqida so'rasa — shu ma'lumotlardan ANIQ foydalan, o'zingdan taxmin qilma. ` +
     `Jins ma'lumoti FAQAT ismga qarab dasturiy taxmin ekanini eslatib o't (Telegram bot API foydalanuvchi ` +
     `jinsini umuman bermaydi) — sonlarni "taxminan" so'zi bilan ber, 100% aniq deb ko'rsatma.\n\n` +
-
     `━━━ XABAR YUBORISH (BROADCAST) ━━━\n` +
     `Agar admin BARCHA foydalanuvchilarga xabar yubormoqchi bo'lsa (masalan: "foydalanuvchilarga yangi ` +
     `kino qo'shildi deb xabar yubor"), quyidagicha ishla:\n` +
@@ -139,7 +188,6 @@ function adminSystemPrompt(stats: string, userInfo: string): string {
     `ko'rinadigan matn bo'lsin — hech qanday qo'shimcha izoh yoki tirnoq yozma.\n` +
     `4. XABARNI O'ZING YUBORMAYSAN — bot adminga tasdiqlash/fikr bildirish/bekor qilish tugmalarini ` +
     `ko'rsatadi, admin tasdiqlagandan keyingina yuboriladi.\n\n` +
-
     `━━━ SOZLAMALARNI O'ZGARTIRISH ━━━\n` +
     `Agar admin bot SOZLAMASINI o'zgartirishni so'rasa (masalan "majburiy obunani o'chir", ` +
     `"foydalanuvchi AI modelini cerebras qil"), javobing OXIRIGA quyidagicha qo'sh:\n` +
@@ -148,7 +196,6 @@ function adminSystemPrompt(stats: string, userInfo: string): string {
     `bool kalitlar uchun qiymat: 1 (yoq) yoki 0 (o'chir). Model kalitlari uchun "provider:model" ` +
     `formatida (masalan cerebras:llama-3.3-70b). O'zgarishni O'ZING QO'LLAMAYSAN — bot adminga ` +
     `tasdiqlash tugmalarini ko'rsatadi, tasdiqdan keyin qo'llaydi. Blokdan oldin qisqa izoh yozishing mumkin.\n\n` +
-
     `Endi adminga eng yaxshi tarzda yordam ber!`
   );
 }
@@ -158,7 +205,10 @@ function settingsWhitelistText(): string {
 }
 
 /** [SETTING:key=value] bloklarini ajratib oladi va matndan olib tashlaydi */
-function extractSettings(answer: string): { display: string; changes: { key: string; value: string }[] } {
+function extractSettings(answer: string): {
+  display: string;
+  changes: { key: string; value: string }[];
+} {
   const changes: { key: string; value: string }[] = [];
   const re = /\[SETTING:\s*([a-z0-9_]+)\s*=\s*([^\]]*)\]/gi;
   let m: RegExpExecArray | null;
@@ -179,14 +229,18 @@ function pushAdminHistory(ctx: MyContext, userText: string, assistantText: strin
   const h = getAdminHistory(ctx);
   h.push({ role: "user", content: userText });
   h.push({ role: "assistant", content: assistantText });
-  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiAdminHistory: h.slice(-ADMIN_HISTORY_MAX) };
+  ctx.session.scratch = {
+    ...(ctx.session.scratch ?? {}),
+    aiAdminHistory: h.slice(-ADMIN_HISTORY_MAX),
+  };
 }
 function clearAdminHistory(ctx: MyContext) {
   if (ctx.session.scratch) delete ctx.session.scratch.aiAdminHistory;
 }
 
 async function askAdminAi(ctx: MyContext, prompt: string): Promise<string | null> {
-  const stats = await buildAdminStats();
+  // 60 soniyalik kesh — har AI xabarida 15+ DB so'rov bajarilmasin (3.5)
+  const stats = await getCachedStat("aiAdminStats", buildAdminStats);
   return askAIChat("admin", {
     system: adminSystemPrompt(stats, buildAdminInfo(ctx)),
     history: getAdminHistory(ctx),
@@ -202,16 +256,13 @@ function extractBroadcast(answer: string): { display: string; draft: string | nu
 
 async function showDraftPreview(ctx: MyContext, draft: string) {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiAdminDraft: draft };
-  await ctx.reply(
-    `📢 <b>Xabar qoralamasi</b> (barcha foydalanuvchilarga):\n\n${draft}`,
-    {
-      reply_markup: kb(
-        [ibtn("✅ Tasdiqlash va yuborish", "aiadm:send", "success")],
-        [ibtn("✏️ Fikr bildirish", "aiadm:feedback", "primary")],
-        [ibtn("❌ Bekor qilish", "aiadm:cancel", "danger")],
-      ),
-    }
-  );
+  await ctx.reply(`📢 <b>Xabar qoralamasi</b> (barcha foydalanuvchilarga):\n\n${draft}`, {
+    reply_markup: kb(
+      [ibtn("✅ Tasdiqlash va yuborish", "aiadm:send", "success")],
+      [ibtn("✏️ Fikr bildirish", "aiadm:feedback", "primary")],
+      [ibtn("❌ Bekor qilish", "aiadm:cancel", "danger")]
+    ),
+  });
 }
 
 async function enterAdminAiChat(ctx: MyContext): Promise<void> {
@@ -224,12 +275,12 @@ async function enterAdminAiChat(ctx: MyContext): Promise<void> {
   clearAdminHistory(ctx);
   await ctx.reply(
     `🤖 <b>Admin AI yordamchi</b> — cheklovsiz xizmatingizda! ✨\n\n` +
-    `Men bilan erkin suhbatlashing:\n` +
-    `📊 <i>"Nechta foydalanuvchimiz bor?"</i>\n` +
-    `🎬 <i>"Qaysi kinolar janrsiz qolgan?"</i>\n` +
-    `📢 <i>"Foydalanuvchilarga yangi serial qo'shildi deb xabar yubor"</i>\n` +
-    `💬 yoki istalgan savol/muammoingizni yozing.\n\n` +
-    `Chiqish uchun <b>${AI_EXIT}</b> tugmasini bosing.`,
+      `Men bilan erkin suhbatlashing:\n` +
+      `📊 <i>"Nechta foydalanuvchimiz bor?"</i>\n` +
+      `🎬 <i>"Qaysi kinolar janrsiz qolgan?"</i>\n` +
+      `📢 <i>"Foydalanuvchilarga yangi serial qo'shildi deb xabar yubor"</i>\n` +
+      `💬 yoki istalgan savol/muammoingizni yozing.\n\n` +
+      `Chiqish uchun <b>${AI_EXIT}</b> tugmasini bosing.`,
     { reply_markup: aiActiveKeyboard() }
   );
 }
@@ -247,17 +298,20 @@ aiAdminHandler.hears(AI_EXIT, async (ctx) => {
     delete ctx.session.scratch.aiAdminAwaitingFeedback;
   }
   clearAdminHistory(ctx);
-  await ctx.reply(
-    wasActive ? "AI yordamchidan chiqdingiz. 👋" : "Asosiy menyu:",
-    { reply_markup: adminMenuKeyboard(ctx.from!.id) }
-  );
+  await ctx.reply(wasActive ? "AI yordamchidan chiqdingiz. 👋" : "Asosiy menyu:", {
+    reply_markup: adminMenuKeyboard(ctx.from!.id),
+  });
 });
 
 aiAdminHandler.on("message:text", async (ctx, next) => {
   if (!ctx.session.scratch?.aiAdminChat) return next();
 
   const text = ctx.message.text.trim();
-  if (text.startsWith("/")) { if (ctx.session.scratch) delete ctx.session.scratch.aiAdminChat; clearAdminHistory(ctx); return next(); }
+  if (text.startsWith("/")) {
+    if (ctx.session.scratch) delete ctx.session.scratch.aiAdminChat;
+    clearAdminHistory(ctx);
+    return next();
+  }
 
   // Qoralamaga fikr bildirish rejimi
   if (ctx.session.scratch?.aiAdminAwaitingFeedback) {
@@ -267,9 +321,12 @@ aiAdminHandler.on("message:text", async (ctx, next) => {
     const answer = await askAdminAi(
       ctx,
       `Avvalgi xabar qoralamasi:\n"${prevDraft}"\n\nMening fikrim: "${text}"\n\n` +
-      `Shu fikr asosida xabarni qayta tayyorla va [BROADCAST_START]/[BROADCAST_END] formatida ber.`
+        `Shu fikr asosida xabarni qayta tayyorla va [BROADCAST_START]/[BROADCAST_END] formatida ber.`
     );
-    if (!answer) { await ctx.reply("🤖 Xatolik yuz berdi, qayta urinib ko'ring."); return; }
+    if (!answer) {
+      await ctx.reply("🤖 Xatolik yuz berdi, qayta urinib ko'ring.");
+      return;
+    }
     const { display, draft } = extractBroadcast(answer);
     if (display) await ctx.reply(display);
     if (draft) await showDraftPreview(ctx, draft);
@@ -294,7 +351,9 @@ aiAdminHandler.on("message:text", async (ctx, next) => {
   const { display: afterSettings, changes } = extractSettings(answer);
   const { display, draft } = extractBroadcast(afterSettings);
   if (display) {
-    await ctx.reply(display).catch(async () => { await ctx.reply(e.escapeHtml(display)); });
+    await ctx.reply(display).catch(async () => {
+      await ctx.reply(e.escapeHtml(display));
+    });
   }
   if (draft) await showDraftPreview(ctx, draft);
   if (changes.length) await showSettingsPreview(ctx, changes);
@@ -309,22 +368,28 @@ async function showSettingsPreview(ctx: MyContext, changes: { key: string; value
   for (const c of valid) {
     const spec = findControllable(c.key)!;
     const cur = await getSetting(c.key, "—");
-    lines.push(`• <b>${spec.label}</b>\n   <code>${cur || "—"}</code> → <code>${e.escapeHtml(c.value)}</code>`);
+    lines.push(
+      `• <b>${spec.label}</b>\n   <code>${cur || "—"}</code> → <code>${e.escapeHtml(c.value)}</code>`
+    );
   }
 
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiAdminSettings: valid };
   await ctx.reply(lines.join("\n"), {
     reply_markup: kb(
       [ibtn("✅ Tasdiqlash va qo'llash", "aiadm:setapply", "success")],
-      [ibtn("❌ Bekor qilish", "aiadm:setcancel", "danger")],
+      [ibtn("❌ Bekor qilish", "aiadm:setcancel", "danger")]
     ),
   });
 }
 
 aiAdminHandler.callbackQuery("aiadm:setapply", async (ctx) => {
   await ctx.answerCallbackQuery();
-  const changes = ctx.session.scratch?.aiAdminSettings as { key: string; value: string }[] | undefined;
-  if (!changes?.length) { await ctx.reply("❌ O'zgarish topilmadi."); return; }
+  const changes = ctx.session.scratch?.aiAdminSettings as
+    { key: string; value: string }[] | undefined;
+  if (!changes?.length) {
+    await ctx.reply("❌ O'zgarish topilmadi.");
+    return;
+  }
   if (ctx.session.scratch) delete ctx.session.scratch.aiAdminSettings;
 
   let applied = 0;
@@ -344,7 +409,10 @@ aiAdminHandler.callbackQuery("aiadm:setcancel", async (ctx) => {
 aiAdminHandler.callbackQuery("aiadm:send", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Yuborilmoqda..." });
   const draft = ctx.session.scratch?.aiAdminDraft as string | undefined;
-  if (!draft) { await ctx.reply("❌ Qoralama topilmadi."); return; }
+  if (!draft) {
+    await ctx.reply("❌ Qoralama topilmadi.");
+    return;
+  }
   if (ctx.session.scratch) delete ctx.session.scratch.aiAdminDraft;
 
   if (!acquireBulkLock(BULK_KEY)) {
@@ -361,39 +429,95 @@ aiAdminHandler.callbackQuery("aiadm:send", async (ctx) => {
     releaseBulkLock(BULK_KEY);
     await ctx.reply(
       "❌ Xabar matnida xato bor (HTML teglari noto'g'ri) — hech kimga yuborilmadi.\n" +
-      "Qoralamani qayta yozdiring."
+        "Qoralamani qayta yozdiring."
     );
     return;
   }
 
-  const users = await prisma.user.findMany({ where: { isBlocked: false }, select: { id: true } });
-  const statusMsg = await ctx.reply(`⏳ Yuborilmoqda: 0 / ${users.length}...`);
+  // Lock olingan holda userlar ro'yxatini yuklash / status xabari xatoga uchrasa —
+  // lock ALBATTA qaytariladi. Aks holda keyingi barcha broadcastlar abadiy
+  // "boshqa yuborish davom etmoqda" deb bloklanib qolardi (quyidagi IIFE ning
+  // finally'iga hali yetib bormaganmiz).
+  let users: { id: bigint }[];
+  let statusMsg: Awaited<ReturnType<typeof ctx.reply>>;
+  try {
+    users = await prisma.user.findMany({ where: { isBlocked: false }, select: { id: true } });
+    statusMsg = await ctx.reply(`⏳ Yuborilmoqda: 0 / ${users.length}...`);
+  } catch (err) {
+    releaseBulkLock(BULK_KEY);
+    log("error", "AI broadcastni boshlashda xato — lock qaytarildi", {
+      error: formatError(err),
+    });
+    await ctx
+      .reply("❌ Broadcastni boshlashda xato yuz berdi. Qayta urinib ko'ring.")
+      .catch(() => {});
+    return;
+  }
 
   void (async () => {
+    // Crash-safe (3.1): yuborishdan oldin "running" job — AI broadcast ham
+    // broadcast tarixi bilan bir xil yo'ldan o'tadi.
+    let jobId: number | null = null;
+    try {
+      jobId = await createBroadcastJob({
+        targetType: "all",
+        targetExtra: "ai",
+        total: users.length,
+      });
+    } catch (e) {
+      log("error", "AI broadcast job yaratilmadi (crash-safety yo'q)", { error: String(e) });
+    }
+
     try {
       const result = await bulkSend({
         userIds: users.map((u) => u.id),
         send: (uid) => ctx.api.sendMessage(uid, draft, { parse_mode: "HTML" }),
         onProgress: async (r) => {
           if (r.processed < r.total) {
-            await ctx.api.editMessageText(chatId, statusMsg.message_id, `⏳ ${r.processed} / ${r.total}...`).catch(() => {});
+            await ctx.api
+              .editMessageText(chatId, statusMsg.message_id, `⏳ ${r.processed} / ${r.total}...`)
+              .catch(() => {});
+          }
+          if (jobId) {
+            await updateBroadcastJob(jobId, {
+              processed: r.processed,
+              sentCount: r.sent,
+              failCount: r.failed,
+              blockedCount: r.blocked,
+            });
           }
         },
       });
 
-      await prisma.broadcast.create({
-        data: {
-          targetType: "all",
-          targetExtra: "ai",
+      if (jobId) {
+        await updateBroadcastJob(jobId, {
+          processed: result.processed,
           sentCount: result.sent,
-          failCount: result.blocked + result.failed,
-        },
-      }).catch(() => null);
+          failCount: result.failed,
+          blockedCount: result.blocked,
+          status: result.aborted ? "aborted" : "completed",
+          abortReason: result.aborted ? (result.abortReason ?? "to'xtatildi") : null,
+        });
+      } else {
+        await prisma.broadcast
+          .create({
+            data: {
+              targetType: "all",
+              targetExtra: "ai",
+              sentCount: result.sent,
+              failCount: result.blocked + result.failed,
+            },
+          })
+          .catch(() => null);
+      }
 
-      await ctx.api.editMessageText(
-        chatId, statusMsg.message_id,
-        `✅ <b>Xabar yuborildi!</b>\n\n${formatBulkResult(result)}`
-      ).catch(() => {});
+      await ctx.api
+        .editMessageText(
+          chatId,
+          statusMsg.message_id,
+          `✅ <b>Xabar yuborildi!</b>\n\n${formatBulkResult(result)}`
+        )
+        .catch(() => {});
     } catch (err) {
       console.error("🛑 AI broadcast xatosi:", err);
     } finally {

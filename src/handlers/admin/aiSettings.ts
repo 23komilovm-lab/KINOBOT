@@ -3,7 +3,10 @@ import { adminCan } from "../../config.js";
 import { ibtn, kb, BE, BOT_SETTINGS_TEXT } from "../../utils/keyboard.js";
 import { getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import {
-  PROVIDERS, availableProviders, rateLimitSnapshot, lastProviderError,
+  PROVIDERS,
+  availableProviders,
+  rateLimitSnapshot,
+  lastProviderError,
 } from "../../services/ai.js";
 import { todayUsage } from "../../services/aiUsage.js";
 import type { MyContext } from "../../types.js";
@@ -87,7 +90,10 @@ aiSettingsHandler.hears(BOT_SETTINGS_TEXT.ai, async (ctx) => {
 });
 
 aiSettingsHandler.callbackQuery("aiset:open", async (ctx) => {
-  if (!adminCan(ctx.from.id, "ai")) { await ctx.answerCallbackQuery(); return; }
+  if (!adminCan(ctx.from.id, "ai")) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
   await ctx.answerCallbackQuery();
   await renderPanel(ctx, true);
 });
@@ -110,10 +116,11 @@ aiSettingsHandler.callbackQuery(/^aiset:scope:(u|a)$/, async (ctx) => {
   rows.push([ibtn("♻️ Avtomatik (fallback)", `aiset:auto:${scope}`, "success")]);
   rows.push([ibtn("Orqaga", "aiset:open", undefined, BE.backMenu)]);
 
-  await ctx.editMessageText(
-    `<b>${scopeLabel(scope)}</b> uchun provayderni tanlang:`,
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(`<b>${scopeLabel(scope)}</b> uchun provayderni tanlang:`, {
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 });
 
 // Provayder tanlandi → modellar ro'yxati
@@ -129,10 +136,11 @@ aiSettingsHandler.callbackQuery(/^aiset:prov:(u|a):(\d+)$/, async (ctx) => {
   ]);
   rows.push([ibtn("Orqaga", `aiset:scope:${scope}`, undefined, BE.backMenu)]);
 
-  await ctx.editMessageText(
-    `<b>${scopeLabel(scope)}</b> · <b>${p.label}</b>\n\nModelni tanlang:`,
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(`<b>${scopeLabel(scope)}</b> · <b>${p.label}</b>\n\nModelni tanlang:`, {
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 });
 
 // Model tanlandi → saqlash
@@ -140,9 +148,15 @@ aiSettingsHandler.callbackQuery(/^aiset:set:(u|a):(\d+):(\d+)$/, async (ctx) => 
   const scope = ctx.match[1] as "u" | "a";
   const p = PROVIDERS[Number(ctx.match[2])];
   const m = p?.models[Number(ctx.match[3])];
-  if (!p || !m) { await ctx.answerCallbackQuery(); return; }
+  if (!p || !m) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
   await setSetting(scopeKey(scope), `${p.id}:${m.id}`);
-  await ctx.answerCallbackQuery({ text: `✅ ${scopeLabel(scope)}: ${p.label} · ${m.label}`, show_alert: true });
+  await ctx.answerCallbackQuery({
+    text: `✅ ${scopeLabel(scope)}: ${p.label} · ${m.label}`,
+    show_alert: true,
+  });
   await renderPanel(ctx, true);
 });
 
@@ -150,6 +164,9 @@ aiSettingsHandler.callbackQuery(/^aiset:set:(u|a):(\d+):(\d+)$/, async (ctx) => 
 aiSettingsHandler.callbackQuery(/^aiset:auto:(u|a)$/, async (ctx) => {
   const scope = ctx.match[1] as "u" | "a";
   await setSetting(scopeKey(scope), "");
-  await ctx.answerCallbackQuery({ text: `✅ ${scopeLabel(scope)}: avtomatik fallback`, show_alert: true });
+  await ctx.answerCallbackQuery({
+    text: `✅ ${scopeLabel(scope)}: avtomatik fallback`,
+    show_alert: true,
+  });
   await renderPanel(ctx, true);
 });

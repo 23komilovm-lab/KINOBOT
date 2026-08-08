@@ -3,11 +3,26 @@ import type { Conversation } from "@grammyjs/conversations";
 import { prisma } from "../../prisma.js";
 import { config, adminCan } from "../../config.js";
 import { ce, e } from "../../utils/emoji.js";
-import { ADMIN_MENU_BUTTONS, ibtn, BE, kb, cancelKeyboard, adminMenuKeyboard } from "../../utils/keyboard.js";
+import {
+  ADMIN_MENU_BUTTONS,
+  ibtn,
+  BE,
+  kb,
+  cancelKeyboard,
+  adminMenuKeyboard,
+} from "../../utils/keyboard.js";
 import { isValidUrl, resolveButtonStyle } from "../../utils/contentButton.js";
-import { getSetting, setSetting, getGlobalButton, getBool, setBool, KEYS } from "../../utils/settings.js";
+import {
+  getSetting,
+  setSetting,
+  getGlobalButton,
+  getBool,
+  setBool,
+  KEYS,
+} from "../../utils/settings.js";
 import { postToMovieChannel, describeError } from "../../services/movieChannel.js";
 import { aiEnabled, askAI } from "../../services/ai.js";
+import { normalizeTitle } from "../../utils/translit.js";
 import type { MyContext } from "../../types.js";
 
 export const moviesHandler = new Composer<MyContext>();
@@ -22,23 +37,34 @@ const isCancel = (t?: string) => t === CANCEL || t === "/cancel";
  */
 function cleanGenre(raw: string | null): string | null {
   if (!raw) return null;
-  let s = raw.trim().split("\n")[0];            // faqat 1-qator
-  s = s.replace(/^[^:]{0,40}:\s*/, "");          // "Janr:" kabi prefiks
-  s = s.replace(/["'«»`*]/g, "");                // tirnoq/markdown
-  s = s.replace(/\s*\.\s*$/, "");                // oxiridagi nuqta
+  let s = raw.trim().split("\n")[0]; // faqat 1-qator
+  s = s.replace(/^[^:]{0,40}:\s*/, ""); // "Janr:" kabi prefiks
+  s = s.replace(/["'«»`*]/g, ""); // tirnoq/markdown
+  s = s.replace(/\s*\.\s*$/, ""); // oxiridagi nuqta
   // "filmi/film/kino" kabi so'zlar va ulardan oldingi nom qismini olib tashlash
   s = s.replace(/^.*?\b(?:filmi|film|kinosi|kino)\b\s*/i, "");
-  s = s.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 3).join(", ");
+  s = s
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(", ");
   s = s.slice(0, 100).trim();
   return s || null;
 }
 
 function movieMenu() {
   return kb(
-    [ibtn("Kino qo'shish", "mv:add", "success", BE.chAdd), ibtn("Ro'yxat", "mv:list:0", "primary", BE.chList)],
-    [ibtn("Knopka boshqaruvi", "mv:btnlist:0"), ibtn("O'chirish", "mv:del:0", "danger", BE.chDelete)],
+    [
+      ibtn("Kino qo'shish", "mv:add", "success", BE.chAdd),
+      ibtn("Ro'yxat", "mv:list:0", "primary", BE.chList),
+    ],
+    [
+      ibtn("Knopka boshqaruvi", "mv:btnlist:0"),
+      ibtn("O'chirish", "mv:del:0", "danger", BE.chDelete),
+    ],
     [ibtn("📲 Keyingi xabar (post)", "mv:pdmenu", "primary")],
-    [ibtn("Menyuga qaytish", "mv:close", undefined, BE.backMenu)],
+    [ibtn("Menyuga qaytish", "mv:close", undefined, BE.backMenu)]
   );
 }
 
@@ -80,7 +106,7 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   const video = vidCtx.message?.video;
   if (!video)
     return vidCtx.reply("❌ Bu video emas.", { reply_markup: adminMenuKeyboard(ownerId) });
-  const fileId   = video.file_id;
+  const fileId = video.file_id;
   const duration = video.duration ?? null;
 
   await vidCtx.reply("2️⃣ Kino <b>kodini</b> kiriting (raqam). Masalan: <code>123</code>");
@@ -90,10 +116,16 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
     if (isCancel(c.message?.text))
       return c.reply("❌ Bekor qilindi.", { reply_markup: adminMenuKeyboard(ownerId) });
     const t = c.message?.text?.trim() ?? "";
-    if (!/^\d+$/.test(t)) { await c.reply("❌ Faqat raqam."); continue; }
+    if (!/^\d+$/.test(t)) {
+      await c.reply("❌ Faqat raqam.");
+      continue;
+    }
     code = Number(t);
     const exists = await conversation.external(() => prisma.movie.findUnique({ where: { code } }));
-    if (exists) { await c.reply("⚠️ Bu kod band."); continue; }
+    if (exists) {
+      await c.reply("⚠️ Bu kod band.");
+      continue;
+    }
     break;
   }
 
@@ -101,16 +133,58 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   const titleCtx = await conversation.wait();
   if (isCancel(titleCtx.message?.text))
     return titleCtx.reply("❌ Bekor qilindi.", { reply_markup: adminMenuKeyboard(ownerId) });
-  const title = titleCtx.message?.text?.trim() || "Nomsiz";
+  let title = titleCtx.message?.text?.trim() || "Nomsiz";
+
+  // 3.5️⃣ Takroriy nomdan ogohlantirish (case-insensitive) — dublikat kino
+  // qo'shilmasligi uchun. Admin "+" bilan tasdiqlab yoki yangi nom berib ketadi.
+  const dup = await conversation.external(() =>
+    prisma.movie.findFirst({
+      where: { title: { equals: title, mode: "insensitive" } },
+      select: { code: true },
+    })
+  );
+  if (dup) {
+    await titleCtx.reply(
+      `⚠️ <b>${e.escapeHtml(title)}</b> nomli kino allaqachon bor (kod: <code>${dup.code}</code>).\n\n` +
+        `Shunday qo'shish uchun <code>+</code> yuboring, yoki <b>boshqa nom</b> yozing.`,
+      { reply_markup: cancelKeyboard() }
+    );
+    while (true) {
+      const tc = await conversation.wait();
+      if (isCancel(tc.message?.text))
+        return tc.reply("❌ Bekor qilindi.", { reply_markup: adminMenuKeyboard(ownerId) });
+      const t = tc.message?.text?.trim() ?? "";
+      if (t === "+") break;
+      if (!t) {
+        await tc.reply("❌ Nom bo'sh bo'lishi mumkin emas.");
+        continue;
+      }
+      const dup2 = await conversation.external(() =>
+        prisma.movie.findFirst({
+          where: { title: { equals: t, mode: "insensitive" } },
+          select: { code: true },
+        })
+      );
+      if (dup2) {
+        await tc.reply(
+          `⚠️ Bu nom ham band (kod: <code>${dup2.code}</code>). <code>+</code> bilan tasdiqlang yoki boshqa nom yozing.`
+        );
+        continue;
+      }
+      title = t;
+      break;
+    }
+  }
 
   // 4️⃣ Janr — AI AVTOMATIK aniqlaydi, admin xohlasa o'zgartiradi
   let genre: string | null = null;
   if (aiEnabled()) {
     await ctx.reply("🤖 AI janrni aniqlamoqda...");
     const aiGenre = await conversation.external(() =>
-      askAI("admin",
+      askAI(
+        "admin",
         `"${title}" nomli kino qaysi janrga mansub? Faqat 1-3 ta janr nomini vergul bilan yoz, ` +
-        `boshqa hech narsa yozma (izoh, tirnoq, nuqta ham yo'q). O'zbekcha. Masalan: Jangari, Drama`,
+          `boshqa hech narsa yozma (izoh, tirnoq, nuqta ham yo'q). O'zbekcha. Masalan: Jangari, Drama`
       )
     );
     genre = cleanGenre(aiGenre);
@@ -119,15 +193,15 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   if (genre) {
     await ctx.reply(
       `4️⃣ 🤖 AI aniqlagan janr: <b>${e.escapeHtml(genre)}</b>\n\n` +
-      `Shu bo'lsa <code>+</code> deb yuboring (yoki "Tasdiqlash" tugmasi).\n` +
-      `O'zgartirmoqchi bo'lsangiz — yangi janrni yozing.`,
+        `Shu bo'lsa <code>+</code> deb yuboring (yoki "Tasdiqlash" tugmasi).\n` +
+        `O'zgartirmoqchi bo'lsangiz — yangi janrni yozing.`,
       { reply_markup: cancelKeyboard() }
     );
   } else {
     await ctx.reply(
       `4️⃣ Kino <b>janrini</b> kiriting. Masalan: <code>Jangari, Drama</code>\n` +
-      `Janrsiz davom etish uchun <code>-</code> yozing.` +
-      (aiEnabled() ? `\n\n<i>⚠️ AI janrni aniqlay olmadi.</i>` : ""),
+        `Janrsiz davom etish uchun <code>-</code> yozing.` +
+        (aiEnabled() ? `\n\n<i>⚠️ AI janrni aniqlay olmadi.</i>` : ""),
       { reply_markup: cancelKeyboard() }
     );
   }
@@ -146,8 +220,8 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   // 5️⃣ Qisqa (treyler) video — o'tkazib yuborish mumkin
   await ctx.reply(
     "5️⃣ Endi <b>qisqa (treyler) videosini</b> yuboring.\n\n" +
-    "Bu video ommaviy kino kanaliga tashlanadi.\n" +
-    "O'tkazib yuborish uchun <code>-</code> yozing.",
+      "Bu video ommaviy kino kanaliga tashlanadi.\n" +
+      "O'tkazib yuborish uchun <code>-</code> yozing.",
     { reply_markup: cancelKeyboard() }
   );
   let shortFileId: string | null = null;
@@ -155,29 +229,50 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
     const sc = await conversation.wait();
     if (isCancel(sc.message?.text))
       return sc.reply("❌ Bekor qilindi.", { reply_markup: adminMenuKeyboard(ownerId) });
-    if (sc.message?.text?.trim() === "-") { shortFileId = null; break; }
-    if (sc.message?.video) { shortFileId = sc.message.video.file_id; break; }
+    if (sc.message?.text?.trim() === "-") {
+      shortFileId = null;
+      break;
+    }
+    if (sc.message?.video) {
+      shortFileId = sc.message.video.file_id;
+      break;
+    }
     await sc.reply("❌ Video yuboring yoki o'tkazib yuborish uchun <code>-</code> yozing.");
   }
 
-  let baseMsgId: number | null = null;
+  // DB-create → base-post → short-post tartibi (3.2):
+  // Avval DB'da kino yaratiladi — baza kanal posti muvaffaqiyatsiz bo'lsa ham
+  // kino saqlanib qoladi (baseMsgId null bo'ladi, bu holat to'liq qo'llab-quvvatlanadi).
+  // Teskarisi (avval kanalga post) DB xatosida YETIM post qoldirardi.
+  const movie = await conversation.external(() =>
+    prisma.movie.create({
+      data: {
+        code,
+        title,
+        genre,
+        fileId,
+        baseMsgId: null,
+        duration,
+        shortFileId,
+        titleNorm: normalizeTitle(title),
+      },
+    })
+  );
+
+  // Baza kanalga arxiv posti — muvaffaqiyatsiz bo'lsa ham kino ishlayveradi
   if (config.baseChannelId) {
     try {
       const sent = await ctx.api.sendVideo(config.baseChannelId, fileId, {
         caption: `#kino #${code}\n🎬 ${e.escapeHtml(title)}`,
       });
-      baseMsgId = sent.message_id;
+      await conversation.external(() =>
+        prisma.movie.update({ where: { id: movie.id }, data: { baseMsgId: sent.message_id } })
+      );
     } catch (err) {
       console.error(`🛑 Kino baza kanalga tashlanmadi (kod ${code}):`, err);
       await ctx.reply(`⚠️ Baza kanalga tashlab bo'lmadi: ${e.escapeHtml(describeError(err))}`);
     }
   }
-
-  const movie = await conversation.external(() =>
-    prisma.movie.create({
-      data: { code, title, genre, fileId, baseMsgId, duration, shortFileId },
-    })
-  );
 
   // Qisqa videoni kino kanalga tashlash
   let shortStatus: string;
@@ -197,10 +292,10 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
 
   await ctx.reply(
     `${ce("check")} <b>Kino qo'shildi!</b>\n\n` +
-    `🎬 ${e.escapeHtml(movie.title)}\n` +
-    `${ce("star")} Kod: <code>${movie.code}</code>\n` +
-    (baseMsgId ? `📦 Baza kanalga tashlandi.\n` : `ℹ️ Baza kanal sozlanmagan.\n`) +
-    shortStatus,
+      `🎬 ${e.escapeHtml(movie.title)}\n` +
+      `${ce("star")} Kod: <code>${movie.code}</code>\n` +
+      (movie.baseMsgId ? `📦 Baza kanalga tashlandi.\n` : `ℹ️ Baza kanal posti tashlanmadi.\n`) +
+      shortStatus,
     { reply_markup: adminMenuKeyboard(ownerId) }
   );
 }
@@ -219,9 +314,11 @@ moviesHandler.callbackQuery(/^mv:del:(\d+)$/, async (ctx) => {
 });
 
 async function renderList(ctx: MyContext, page: number, delMode: boolean) {
-  const total  = await prisma.movie.count();
+  const total = await prisma.movie.count();
   const movies = await prisma.movie.findMany({
-    orderBy: { code: "asc" }, skip: page * PAGE, take: PAGE,
+    orderBy: { code: "asc" },
+    skip: page * PAGE,
+    take: PAGE,
   });
 
   if (movies.length === 0) {
@@ -238,19 +335,23 @@ async function renderList(ctx: MyContext, page: number, delMode: boolean) {
     );
   }
 
-  const pages  = Math.ceil(total / PAGE);
+  const pages = Math.ceil(total / PAGE);
   const prefix = delMode ? "mv:del" : "mv:list";
   const nav: ReturnType<typeof ibtn>[] = [];
-  if (page > 0)         nav.push(ibtn("⬅️", `${prefix}:${page - 1}`));
+  if (page > 0) nav.push(ibtn("⬅️", `${prefix}:${page - 1}`));
   nav.push(ibtn(`${page + 1}/${pages}`, "noop"));
   if (page < pages - 1) nav.push(ibtn("➡️", `${prefix}:${page + 1}`));
   rows.push(nav);
   rows.push([ibtn("Orqaga", "mv:back", undefined, BE.home)]);
 
-  await ctx.editMessageText(
-    delMode ? "🗑 <b>O'chirish uchun tanlang:</b>" : `${ce("list")} <b>Kinolar</b> (jami ${total}):`,
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      delMode
+        ? "🗑 <b>O'chirish uchun tanlang:</b>"
+        : `${ce("list")} <b>Kinolar</b> (jami ${total}):`,
+      { reply_markup: kb(...rows) }
+    )
+    .catch(() => {});
 }
 
 moviesHandler.callbackQuery("noop", (ctx) => ctx.answerCallbackQuery());
@@ -258,13 +359,15 @@ moviesHandler.callbackQuery("noop", (ctx) => ctx.answerCallbackQuery());
 moviesHandler.callbackQuery("mv:back", async (ctx) => {
   await ctx.answerCallbackQuery();
   const count = await prisma.movie.count();
-  await ctx.editMessageText(
-    `<tg-emoji emoji-id="${BE.movie}">🎬</tg-emoji> <b>Kino boshqaruvi</b>\n\n` +
-      `Kinolar soni: <b>${count}</b>`,
-    {
-      reply_markup: movieMenu(),
-    }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `<tg-emoji emoji-id="${BE.movie}">🎬</tg-emoji> <b>Kino boshqaruvi</b>\n\n` +
+        `Kinolar soni: <b>${count}</b>`,
+      {
+        reply_markup: movieMenu(),
+      }
+    )
+    .catch(() => {});
 });
 
 moviesHandler.callbackQuery(/^mv:btnlist:\d+$/, async (ctx) => {
@@ -273,9 +376,9 @@ moviesHandler.callbackQuery(/^mv:btnlist:\d+$/, async (ctx) => {
 });
 
 async function renderGlobalMovieButtonEditor(ctx: MyContext, edit = true) {
-  const btn     = await getGlobalButton("movie");
+  const btn = await getGlobalButton("movie");
   const enabled = await getBool(KEYS.movieBtnEnabled, true);
-  const status  = btn.buttonUrl
+  const status = btn.buttonUrl
     ? `Nom: <b>${e.escapeHtml(btn.buttonText ?? "Ko'rish")}</b>\nHavola: ${e.escapeHtml(btn.buttonUrl)}\nRang: <b>${btn.buttonStyle}</b>`
     : "Knopka hali sozlanmagan.";
 
@@ -293,14 +396,14 @@ async function renderGlobalMovieButtonEditor(ctx: MyContext, edit = true) {
       ),
     ],
     [
-      ibtn("Nomni o'zgartirish",    "mv:gbtntext",   "primary", BE.editName),
-      ibtn("Havolani o'zgartirish", "mv:gbtnurl",    "primary", BE.editUrl),
+      ibtn("Nomni o'zgartirish", "mv:gbtntext", "primary", BE.editName),
+      ibtn("Havolani o'zgartirish", "mv:gbtnurl", "primary", BE.editUrl),
     ],
     [
       ibtn("🎨 Rangni tanlash", "mv:gbtncolors", "primary"),
-      ibtn("O'chirish",          "mv:gbtnclear",  "danger", BE.chDelete),
+      ibtn("O'chirish", "mv:gbtnclear", "danger", BE.chDelete),
     ],
-    [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)],
+    [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
@@ -322,39 +425,45 @@ async function renderGlobalMovieButtonEditor(ctx: MyContext, edit = true) {
 
 moviesHandler.callbackQuery("mv:gbtncolors", async (ctx) => {
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(
-    "🎨 <b>Knopka rangini tanlang:</b>",
-    {
+  await ctx
+    .editMessageText("🎨 <b>Knopka rangini tanlang:</b>", {
       reply_markup: kb(
         [
-          ibtn("Ko'k",   "mv:gbtnsty:primary", "primary"),
+          ibtn("Ko'k", "mv:gbtnsty:primary", "primary"),
           ibtn("Yashil", "mv:gbtnsty:success", "success"),
-          ibtn("Qizil",  "mv:gbtnsty:danger",  "danger"),
-          ibtn("Random", "mv:gbtnsty:random",  "success"),
+          ibtn("Qizil", "mv:gbtnsty:danger", "danger"),
+          ibtn("Random", "mv:gbtnsty:random", "success"),
         ],
-        [ibtn("Orqaga", "mv:btnlist:0", undefined, BE.backMenu)],
+        [ibtn("Orqaga", "mv:btnlist:0", undefined, BE.backMenu)]
       ),
-    }
-  ).catch(() => {});
+    })
+    .catch(() => {});
 });
 
 moviesHandler.callbackQuery("mv:gbtntoggle", async (ctx) => {
   const cur = await getBool(KEYS.movieBtnEnabled, true);
   await setBool(KEYS.movieBtnEnabled, !cur);
-  await ctx.answerCallbackQuery({ text: !cur ? "✅ Knopka yoqildi" : "❌ Knopka o'chirildi", show_alert: true });
+  await ctx.answerCallbackQuery({
+    text: !cur ? "✅ Knopka yoqildi" : "❌ Knopka o'chirildi",
+    show_alert: true,
+  });
   await renderGlobalMovieButtonEditor(ctx);
 });
 
 moviesHandler.callbackQuery("mv:gbtntext", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), movieBtnField: "text" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>", { reply_markup: cancelKeyboard() });
+  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>", {
+    reply_markup: cancelKeyboard(),
+  });
 });
 
 moviesHandler.callbackQuery("mv:gbtnurl", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), movieBtnField: "url" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>", { reply_markup: cancelKeyboard() });
+  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>", {
+    reply_markup: cancelKeyboard(),
+  });
 });
 
 moviesHandler.callbackQuery(/^mv:gbtnsty:(primary|success|danger|random)$/, async (ctx) => {
@@ -391,7 +500,9 @@ async function renderPostDeliveryEditor(ctx: MyContext, edit = true) {
 
   const status =
     (text ? `Matn:\n${e.escapeHtml(text)}\n\n` : "Matn hali sozlanmagan.\n\n") +
-    (btnUrl ? `Knopka: <b>${e.escapeHtml(btnText || "—")}</b>\nHavola: ${e.escapeHtml(btnUrl)}\nRang: <b>${btnStyle}</b>` : "Knopka sozlanmagan (ixtiyoriy).");
+    (btnUrl
+      ? `Knopka: <b>${e.escapeHtml(btnText || "—")}</b>\nHavola: ${e.escapeHtml(btnUrl)}\nRang: <b>${btnStyle}</b>`
+      : "Knopka sozlanmagan (ixtiyoriy).");
 
   const msg =
     `<tg-emoji emoji-id="${BE.movie}">📲</tg-emoji> <b>Kino keyingi xabari</b>\n\n` +
@@ -416,7 +527,7 @@ async function renderPostDeliveryEditor(ctx: MyContext, edit = true) {
       ibtn("🎨 Rangni tanlash", "mv:pdbtncolors", "primary"),
       ibtn("Hammasini tozalash", "mv:pdclear", "danger", BE.chDelete),
     ],
-    [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)],
+    [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz — izoh yuqoridagi
@@ -441,7 +552,10 @@ moviesHandler.callbackQuery("mv:pdtoggle", async (ctx) => {
   if (next) {
     const text = await getSetting(KEYS.postDeliveryText, "");
     if (!text.trim()) {
-      await ctx.answerCallbackQuery({ text: "❌ Avval matnni sozlang, keyin yoqing.", show_alert: true });
+      await ctx.answerCallbackQuery({
+        text: "❌ Avval matnni sozlang, keyin yoqing.",
+        show_alert: true,
+      });
       return;
     }
   }
@@ -455,7 +569,7 @@ moviesHandler.callbackQuery("mv:pdtext", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.reply(
     "Kino yuborilgandan keyin chiqadigan <b>matnni</b> yuboring (HTML teglar mumkin).\n\n" +
-    "Masalan: <code>📲 Ilovalar do'koni kerakmi? Apk Topla orqali yuklab oling!</code>",
+      "Masalan: <code>📲 Ilovalar do'koni kerakmi? Apk Topla orqali yuklab oling!</code>",
     { reply_markup: cancelKeyboard() }
   );
 });
@@ -463,31 +577,34 @@ moviesHandler.callbackQuery("mv:pdtext", async (ctx) => {
 moviesHandler.callbackQuery("mv:pdbtntext", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pdField: "btntext" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka nomini yuboring. Masalan: <code>📥 Apk Topla'ni yuklash</code>", { reply_markup: cancelKeyboard() });
+  await ctx.reply("Knopka nomini yuboring. Masalan: <code>📥 Apk Topla'ni yuklash</code>", {
+    reply_markup: cancelKeyboard(),
+  });
 });
 
 moviesHandler.callbackQuery("mv:pdbtnurl", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pdField: "btnurl" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/apktopla</code>", { reply_markup: cancelKeyboard() });
+  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/apktopla</code>", {
+    reply_markup: cancelKeyboard(),
+  });
 });
 
 moviesHandler.callbackQuery("mv:pdbtncolors", async (ctx) => {
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(
-    "🎨 <b>Knopka rangini tanlang:</b>",
-    {
+  await ctx
+    .editMessageText("🎨 <b>Knopka rangini tanlang:</b>", {
       reply_markup: kb(
         [
-          ibtn("Ko'k",   "mv:pdbtnsty:primary", "primary"),
+          ibtn("Ko'k", "mv:pdbtnsty:primary", "primary"),
           ibtn("Yashil", "mv:pdbtnsty:success", "success"),
-          ibtn("Qizil",  "mv:pdbtnsty:danger",  "danger"),
-          ibtn("Random", "mv:pdbtnsty:random",  "success"),
+          ibtn("Qizil", "mv:pdbtnsty:danger", "danger"),
+          ibtn("Random", "mv:pdbtnsty:random", "success"),
         ],
-        [ibtn("Orqaga", "mv:pdmenu", undefined, BE.backMenu)],
+        [ibtn("Orqaga", "mv:pdmenu", undefined, BE.backMenu)]
       ),
-    }
-  ).catch(() => {});
+    })
+    .catch(() => {});
 });
 
 moviesHandler.callbackQuery(/^mv:pdbtnsty:(primary|success|danger|random)$/, async (ctx) => {
@@ -535,7 +652,9 @@ moviesHandler.on("message:text", async (ctx, next) => {
     }
     // btnurl
     if (!isValidUrl(text)) {
-      await ctx.reply("❌ Havola <code>http://</code> yoki <code>https://</code> bilan boshlanishi kerak.");
+      await ctx.reply(
+        "❌ Havola <code>http://</code> yoki <code>https://</code> bilan boshlanishi kerak."
+      );
       return;
     }
     await setSetting(KEYS.postDeliveryBtnUrl, text);
@@ -564,7 +683,9 @@ moviesHandler.on("message:text", async (ctx, next) => {
   }
 
   if (!isValidUrl(text)) {
-    await ctx.reply("❌ Havola <code>http://</code> yoki <code>https://</code> bilan boshlanishi kerak.");
+    await ctx.reply(
+      "❌ Havola <code>http://</code> yoki <code>https://</code> bilan boshlanishi kerak."
+    );
     return;
   }
 
@@ -584,21 +705,24 @@ moviesHandler.callbackQuery(/^mv:view:(\d+)$/, async (ctx) => {
     caption:
       `🎬 <b>${e.escapeHtml(m.title)}</b>\n` +
       `${ce("star")} Kod: <code>${m.code}</code>\n👁 Ko'rishlar: ${m.views}`,
-    reply_markup: kb(
-      [
-        ibtn("Knopkani tahrirlash", "mv:btnlist:0", "primary", BE.editName),
-        ibtn("O'chirish", `mv:delconf:${m.id}`, "danger", BE.chDelete),
-      ]
-    ),
+    reply_markup: kb([
+      ibtn("Knopkani tahrirlash", "mv:btnlist:0", "primary", BE.editName),
+      ibtn("O'chirish", `mv:delconf:${m.id}`, "danger", BE.chDelete),
+    ]),
   });
 });
 
 moviesHandler.callbackQuery(/^mv:delconf:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
-  const m  = await prisma.movie.findUnique({ where: { id } });
+  const m = await prisma.movie.findUnique({ where: { id } });
   await prisma.movie.delete({ where: { id } }).catch(() => {});
+
+  // Kanal postlarini ham tozalaymiz — aks holda o'chirilgan kino postlari
+  // kanalda qolib, o'lgan deep-link (movie_kod) ko'rsatar edi.
   if (m?.baseMsgId && config.baseChannelId)
     await ctx.api.deleteMessage(config.baseChannelId, m.baseMsgId).catch(() => {});
+  if (m?.shortMsgId && config.movieChannelId)
+    await ctx.api.deleteMessage(config.movieChannelId, m.shortMsgId).catch(() => {});
   await ctx.answerCallbackQuery({ text: "🗑 O'chirildi" });
   await ctx.editMessageText("🗑 Kino o'chirildi.").catch(() => {});
 });

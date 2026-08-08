@@ -9,6 +9,10 @@ const SUBSCRIBED_STATUSES = ["creator", "administrator", "member", "restricted"]
 // Kanal turini avtomatik yangilash uchun throttle (har kanal soatiga 1 marta)
 const lastSync = new Map<string, number>();
 const SYNC_TTL_MS = 60 * 60 * 1000;
+// Kanal o'chirilsa lastSync yozuvi qolib ketmasin — hajmi kanallar sonidan
+// oshganda eski yozuvlarni tozalab turamiz.
+const LAST_SYNC_CAP = 50;
+let lastSyncCleanAt = 0;
 
 // A'zolik keshi — har content so'rovida (matn, inline, ...) har kanal uchun
 // getChatMember chaqirilardi. Musbat natija uzoqroq (past xavf — premium holati
@@ -18,6 +22,9 @@ type MembershipEntry = { subscribed: boolean; expiresAt: number };
 const membershipCache = new Map<string, MembershipEntry>(); // key: `${chatId}:${userId}`
 const SUB_POSITIVE_TTL_MS = 10 * 60 * 1000;
 const SUB_NEGATIVE_TTL_MS = 20 * 1000;
+// Kesh o'lcham chegarasi — o'sish LRU bilan cheklanadi. Xatolar (000) qisqa
+// TTL bilan o'z-o'zidan o'chadi, shuning uchun faqat tepa o'lcham muhim.
+const MEMBERSHIP_CACHE_MAX = 2000;
 
 /**
  * Kanal ma'lumotini Telegramdan qayta oladi va tur o'zgargan bo'lsa yangilaydi
@@ -28,6 +35,16 @@ async function maybeSyncChannel(ctx: MyContext, ch: Channel): Promise<Channel> {
   const key = ch.chatId.toString();
   if (Date.now() - (lastSync.get(key) ?? 0) < SYNC_TTL_MS) return ch;
   lastSync.set(key, Date.now());
+
+  // O'lcham chegarasi: kanal o'chirilganda eski yozuvlar to'planib qolmasin.
+  // Soatiga bir marta eskirgan (TTL o'tgan) yozuvlarni tozalaymiz.
+  if (lastSync.size > LAST_SYNC_CAP && Date.now() - lastSyncCleanAt > SYNC_TTL_MS) {
+    lastSyncCleanAt = Date.now();
+    const now = Date.now();
+    for (const [k, t] of lastSync) {
+      if (now - t > SYNC_TTL_MS) lastSync.delete(k);
+    }
+  }
 
   const chat = await ctx.api.getChat(Number(ch.chatId)).catch(() => null);
   if (!chat) return ch;
@@ -44,10 +61,12 @@ async function maybeSyncChannel(ctx: MyContext, ch: Channel): Promise<Channel> {
     inviteLink = link?.invite_link ?? ch.inviteLink;
   }
 
-  const updated = await prisma.channel.update({
-    where: { id: ch.id },
-    data: { username: uname, title, type: newType, inviteLink },
-  }).catch(() => null);
+  const updated = await prisma.channel
+    .update({
+      where: { id: ch.id },
+      data: { username: uname, title, type: newType, inviteLink },
+    })
+    .catch(() => null);
   return updated ?? ch;
 }
 
@@ -75,14 +94,19 @@ export async function getUnsubscribedChannels(
       if (cached && cached.expiresAt > Date.now()) {
         isSub = cached.subscribed;
       } else {
-        const member = await ctx.api
-          .getChatMember(Number(ch.chatId), userId)
-          .catch(() => null);
+        const member = await ctx.api.getChatMember(Number(ch.chatId), userId).catch(() => null);
         isSub = !!(member && SUBSCRIBED_STATUSES.includes(member.status));
         membershipCache.set(cacheKey, {
           subscribed: isSub,
           expiresAt: Date.now() + (isSub ? SUB_POSITIVE_TTL_MS : SUB_NEGATIVE_TTL_MS),
         });
+        // LRU eviction: Map ketma-ketligi o'rnatish tartibida — birinchi kalit
+        // eng eski. O'lcham chegarasidan oshganda faqat bitta yozuvni chiqaramiz
+        // (har qo'shishda bir marta, arzon operatsiya).
+        if (membershipCache.size > MEMBERSHIP_CACHE_MAX) {
+          const oldestKey = membershipCache.keys().next().value;
+          if (oldestKey !== undefined) membershipCache.delete(oldestKey);
+        }
       }
 
       if (isSub) {
@@ -112,36 +136,39 @@ export async function getUnsubscribedChannels(
 }
 
 async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeyboard> {
-  const checkText  = await getSetting(KEYS.subCheckBtnText,    "Tekshirish");
-  const defLabel   = await getSetting(KEYS.subChannelBtnLabel, "+ Kanalga obuna bo'lish");
+  const checkText = await getSetting(KEYS.subCheckBtnText, "Tekshirish");
+  const defLabel = await getSetting(KEYS.subChannelBtnLabel, "+ Kanalga obuna bo'lish");
 
   const kb = new InlineKeyboard();
   for (const ch of channels) {
     const url = channelUrl(ch);
     if (!url) continue;
-    const label = ch.buttonLabel?.trim() ||
-      (ch.type === "INSTAGRAM" ? `📸 ${ch.title}` : defLabel);
+    const label = ch.buttonLabel?.trim() || (ch.type === "INSTAGRAM" ? `📸 ${ch.title}` : defLabel);
     kb.url(label, url).row();
   }
 
   const hasTg = channels.some((c) => c.type !== "INSTAGRAM");
   if (hasTg) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (kb as any).inline_keyboard.push([{
-      text: checkText,
-      callback_data: "sub:check",
-      icon_custom_emoji_id: "5861665979968262792",
-    }]);
+    (kb as any).inline_keyboard.push([
+      {
+        text: checkText,
+        callback_data: "sub:check",
+        icon_custom_emoji_id: "5861665979968262792",
+      },
+    ]);
   }
 
   // Premium tizimi yoqilgan bo'lsa — obunasiz foydalanish uchun premium taklifi
   if (await getBool(KEYS.premiumEnabled, false)) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (kb as any).inline_keyboard.push([{
-      text: "Premium obuna olish",
-      callback_data: "prem:show",
-      icon_custom_emoji_id: "5211179692496808774",
-    }]);
+    (kb as any).inline_keyboard.push([
+      {
+        text: "Premium obuna olish",
+        callback_data: "prem:show",
+        icon_custom_emoji_id: "5211179692496808774",
+      },
+    ]);
   }
 
   return kb;
@@ -152,19 +179,13 @@ const SUB_PROMPT_TEXT =
   `<i>Yoki majburiy obunasiz, cheksiz foydalanish uchun — Premium obuna. 👇</i>`;
 
 /** Obuna so'rovi xabarini yuboradi */
-export async function sendSubscriptionPrompt(
-  ctx: MyContext,
-  channels: Channel[]
-): Promise<void> {
+export async function sendSubscriptionPrompt(ctx: MyContext, channels: Channel[]): Promise<void> {
   const kb = await buildSubscriptionMarkup(channels);
   await ctx.reply(SUB_PROMPT_TEXT, { reply_markup: kb });
 }
 
 /** Obuna so'rovi xabarini joriy (masalan, premium taklifidan qaytilgan) xabar ustiga tahrirlaydi */
-export async function editSubscriptionPrompt(
-  ctx: MyContext,
-  channels: Channel[]
-): Promise<void> {
+export async function editSubscriptionPrompt(ctx: MyContext, channels: Channel[]): Promise<void> {
   const kb = await buildSubscriptionMarkup(channels);
   await ctx.editMessageText(SUB_PROMPT_TEXT, { reply_markup: kb }).catch(async () => {
     await ctx.reply(SUB_PROMPT_TEXT, { reply_markup: kb });
@@ -179,10 +200,7 @@ export function channelUrl(ch: Channel): string | null {
 }
 
 /** True qaytarsa — foydalanuvchi hamma Telegram kanalga a'zo (yoki kanal yo'q) */
-export async function ensureSubscribed(
-  ctx: MyContext,
-  userId: number
-): Promise<boolean> {
+export async function ensureSubscribed(ctx: MyContext, userId: number): Promise<boolean> {
   const notJoined = await getUnsubscribedChannels(ctx, userId);
   // Instagram kanallarini obunasiz ham o'tkazib yuboramiz (tekshirish imkonsiz)
   const blocking = notJoined.filter((c) => c.type !== "INSTAGRAM");

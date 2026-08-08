@@ -30,10 +30,14 @@ model User {
   firstRequestAt    DateTime? // birinchi so'rov vaqti (vaqt cheklovi uchun)
   aiRequestCount    Int      @default(0)  // bugungi AI so'rovlari hisobi
   aiRequestDay      String?  // "YYYY-MM-DD" — kun o'zgarsa aiRequestCount reset
+  contentRequestDay      String? // "YYYY-MM-DD" (Toshkent) — kunlik kontent limiti kuni
+  contentRequestCount    Int      @default(0) // joriy kundagi kontent so'rovlari
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@index([referredById])
+  @@index([premiumUntil])
+  @@index([aiRequestDay])
   @@map("users")
 }
 
@@ -118,6 +122,40 @@ model SurveyResponse {
   @@map("survey_responses")
 }
 
+// ===================== SERIAL KO'RISH PROGRESSI =====================
+// Har bir foydalanuvchi-serial juftligi uchun oxirgi ko'rilgan qism.
+// "Davom etish" tugmasi shu yozuv asosida keyingi qismni ochadi.
+model SerialWatch {
+  userId    BigInt
+  serialId  Int
+  episodeId Int
+  updatedAt DateTime @updatedAt
+
+  serial Serial @relation(fields: [serialId], references: [id], onDelete: Cascade)
+
+  @@id([userId, serialId])
+  @@map("serial_watch")
+}
+
+// ===================== KO'RISH HODISALARI (tavsiya signali) =====================
+// Har bir muvaffaqiyatli yetkazilgan kino/serial qismi uchun yoziladi.
+// Janr affiniteti (recommend) shu jadval asosida hisoblanadi.
+model WatchEvent {
+  id        Int      @id @default(autoincrement())
+  userId    BigInt
+  movieId   Int?
+  serialId  Int?
+  genre     String?
+  createdAt DateTime @default(now())
+
+  movie  Movie?  @relation(fields: [movieId], references: [id], onDelete: SetNull)
+  serial Serial? @relation(fields: [serialId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([genre])
+  @@map("watch_events")
+}
+
 // ===================== BROADCAST TARIXI =====================
 model Broadcast {
   id           Int      @id @default(autoincrement())
@@ -135,8 +173,15 @@ model Broadcast {
   failedIds      String?             // vaqtinchalik xato bo'lgan user id'lar (JSON, max 500)
 
   createdAt   DateTime @default(now())
+  // Broadcast restart-safe: status/progress tiklanish uchun DB'da saqlanadi.
+  // running | completed | aborted | interrupted
+  status      String   @default("completed")
+  total       Int      @default(0)  // jami yuboriladigan userlar soni
+  processed   Int      @default(0)  // ishlanganlar soni
+  updatedAt   DateTime @updatedAt
 
   @@index([createdAt])
+  @@index([status])
   @@map("broadcasts")
 }
 
@@ -179,6 +224,7 @@ model JoinRequest {
 
   @@unique([channelId, userId])
   @@index([channelId, date])
+  @@index([userId])
   @@map("join_requests")
 }
 
@@ -191,6 +237,7 @@ model ChannelEvent {
   date      DateTime @default(now())
 
   @@index([channelId, date])
+  @@index([date])
   @@map("channel_events")
 }
 
@@ -209,7 +256,7 @@ model AiUsage {
   id       Int      @id @default(autoincrement())
   provider String
   model    String
-  day      String   // "YYYY-MM-DD" (UTC)
+  day      String   // "YYYY-MM-DD" — Toshkent vaqti (UTC+5), todayUz() bilan yoziladi
   requests Int      @default(0)
   tokens   Int      @default(0)
 
@@ -222,6 +269,7 @@ model Movie {
   id          Int      @id @default(autoincrement())
   code        Int      @unique
   title       String
+  titleNorm   String   @default("") // normalizeTitle(title) — lotin, kichik, tinishsiz (aqlli qidiruv)
   caption     String?
   fileId      String
   baseMsgId   Int?
@@ -240,7 +288,11 @@ model Movie {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  watchEvents WatchEvent[]
+
   @@index([title])
+  @@index([genre])
+  @@index([views])
   @@map("movies")
 }
 
@@ -249,6 +301,7 @@ model Serial {
   id          Int      @id @default(autoincrement())
   code        Int      @unique
   title       String
+  titleNorm   String   @default("") // normalizeTitle(title) — lotin, kichik, tinishsiz (aqqli qidiruv)
   caption     String?
   posterId    String?
   year        Int?
@@ -261,9 +314,13 @@ model Serial {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  seasons Season[]
+  seasons     Season[]
+  watches     SerialWatch[]
+  watchEvents WatchEvent[]
 
   @@index([title])
+  @@index([genre])
+  @@index([views])
   @@map("serials")
 }
 

@@ -1,5 +1,6 @@
 import { prisma } from "../prisma.js";
 import { getBool, getSetting, KEYS } from "./settings.js";
+import { log } from "./logger.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -21,7 +22,13 @@ export async function getFreeLimits(): Promise<{ requests: number; days: number 
   return { requests: parseInt(r, 10) || 0, days: parseInt(d, 10) || 0 };
 }
 
-/** Foydalanuvchiga premium beradi (mavjud premiumga qo'shadi yoki hozirdan boshlaydi) */
+/**
+ * Foydalanuvchiga premium beradi (mavjud premiumga qo'shadi yoki hozirdan boshlaydi).
+ * DB xatosi YUTILMAYDI — ilgari `.catch(() => null)` tufayli grant ishlamasa ham
+ * funksiya `until` qaytarib, chaqiruvchiga "muvaffaqiyat" ko'rsatardi (to'lov
+ * olingan, premium berilmagan). Endi xato tashlanadi — chaqiruvchi to'lovni
+ * `pending` holatda qoldiradi va owner'ga xabar beradi.
+ */
 export async function grantPremium(userId: bigint, days: number): Promise<Date> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   const base = isPremiumActive(user?.premiumUntil) ? user!.premiumUntil!.getTime() : Date.now();
@@ -30,7 +37,8 @@ export async function grantPremium(userId: bigint, days: number): Promise<Date> 
   await prisma.user.update({
     where: { id: userId },
     data: { premiumUntil: until, premiumWarnStage: 0 },
-  }).catch(() => null);
+  });
+  log("info", "Premium berildi", { userId: userId.toString(), days, until: until.toISOString() });
   return until;
 }
 
@@ -47,9 +55,9 @@ export function activeTariffs() {
  * 1 oy: 333 so'm/kun · 3 oy: 200 so'm/kun · 6 oy: 150 so'm/kun · 1 yil: 137 so'm/kun
  */
 export const DEFAULT_TARIFFS = [
-  { label: "1 oy",  days: 30,  price: 10000, oldPrice: null, starsPrice: 67,  sortOrder: 0 },
-  { label: "3 oy",  days: 90,  price: 18000, oldPrice: null, starsPrice: 120, sortOrder: 1 },
-  { label: "6 oy",  days: 180, price: 27000, oldPrice: null, starsPrice: 180, sortOrder: 2 },
+  { label: "1 oy", days: 30, price: 10000, oldPrice: null, starsPrice: 67, sortOrder: 0 },
+  { label: "3 oy", days: 90, price: 18000, oldPrice: null, starsPrice: 120, sortOrder: 1 },
+  { label: "6 oy", days: 180, price: 27000, oldPrice: null, starsPrice: 180, sortOrder: 2 },
   { label: "1 yil", days: 365, price: 50000, oldPrice: null, starsPrice: 333, sortOrder: 3 },
 ];
 

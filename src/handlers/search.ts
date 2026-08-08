@@ -2,11 +2,11 @@ import { Composer, InlineKeyboard } from "grammy";
 import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { ce, e } from "../utils/emoji.js";
-import { sendMovie, pickRandomMovie } from "../services/media.js";
-import { checkContentAccess, countContentRequest } from "../utils/access.js";
+import { weightedRandomMovie } from "../services/recommend.js";
+import { checkContentAccess } from "../utils/access.js";
 import { confirmReferral } from "../utils/referral.js";
-import { sendSerialSeasons } from "./serialView.js";
-import { deliverByCode } from "./start.js";
+import { deliverByCode, deliverMovie, deliverSerialSeasons } from "../services/delivery.js";
+import { searchContent } from "../services/search.js";
 import { enterAiChat } from "./aiUser.js";
 import { ADMIN_MENU_BUTTONS } from "../utils/keyboard.js";
 import type { MyContext } from "../types.js";
@@ -44,10 +44,14 @@ searchHandler.command("mashhur", async (ctx) => {
 
 // ─── /random — tasodifiy kino ────────────────────────────────────────────────
 searchHandler.command("random", async (ctx) => {
-  if (!(await checkAccess(ctx))) return;
-  const movie = await pickRandomMovie(ctx);
-  if (!movie) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
-  if (await sendMovie(ctx, movie)) await countContentRequest(ctx);
+  // Views-og'irlikli tanlov — mashhur kinolar ko'proq, lekin kam ko'rilganlar
+  // ham imkoniyatga ega (adolatli tasodifiylik, recommend.ts ichida).
+  const movie = await weightedRandomMovie(ctx);
+  if (!movie) {
+    await ctx.reply("📭 Hozircha kino yo'q.");
+    return;
+  }
+  await deliverMovie(ctx, movie);
 });
 
 // ─── Qidiruv knopkasi: ko'p ko'rilgan / inline ───────────────────────────────
@@ -96,27 +100,30 @@ searchHandler.on("message:text", async (ctx, next) => {
   if (text.startsWith("/")) return next();
   if (PANEL_TEXTS.has(text)) return next();
 
-  // Kod bo'yicha — obuna/limit so'ralib qolsa ham kodni eslab qolamiz, shunda
-  // "Tekshirish" bosilgach yoki premium olingach kino/serial avtomatik yetkaziladi.
+  // Kod bo'yicha — to'liq gate delivery.ts ichida ishlaydi. Obunaga bloklansa
+  // pendingCode avtomatik saqlanadi ("Tekshirish" bosilgach qayta yetkaziladi).
   if (/^\d+$/.test(text)) {
     const code = Number(text);
-    ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pendingCode: code };
-    if (!(await checkAccess(ctx))) return;
-    if (ctx.session.scratch) delete ctx.session.scratch.pendingCode;
+    const res = await deliverByCode(ctx, code);
+    if (res.delivered) return;
+    if (!res.ok) return; // bloklovchi xabar ko'rsatilgan
 
-    const delivered = await deliverByCode(ctx, code);
-    if (delivered) { await countContentRequest(ctx); return; }
+    // Gate o'tdi. Topilib, lekin yetkazilmagan bo'lsa (premium taklifi ko'rsatilgan
+    // / send xatosi) — bu yerda "topilmadi" deyish YOLG'ON bo'lardi. Faqat bazada
+    // umuman bo'lmagan kodlar uchun "topilmadi" xabari chiqadi.
+    if (res.found) return;
 
     ctx.session.scratch = {
       ...(ctx.session.scratch ?? {}),
       aiSeedQuery: `${code}-kodli kino topilmadi, menga shunga o'xshash yoki mashhur kinolarni tavsiya qiling`,
     };
     const aiKb = new InlineKeyboard()
-      .text("🤖 AI orqali qidirish", "search:ai").row()
+      .text("🤖 AI orqali qidirish", "search:ai")
+      .row()
       .text("Ko'p ko'rilganlar", "popular:page:0");
     await ctx.reply(
       `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> <b>${code}</b> kodli kino topilmadi.\n\n` +
-      `Nom bilan ham qidirib ko'ring, yoki AI yordamchidan so'rang:`,
+        `Nom bilan ham qidirib ko'ring, yoki AI yordamchidan so'rang:`,
       { reply_markup: aiKb }
     );
     return;
@@ -148,23 +155,15 @@ interface SearchState {
 }
 
 async function searchByName(ctx: MyContext, query: string) {
-  const [movies, serials] = await Promise.all([
-    prisma.movie.findMany({
-      where: { title: { contains: query, mode: "insensitive" } },
-      take: SEARCH_FETCH_LIMIT, orderBy: { views: "desc" },
-    }),
-    prisma.serial.findMany({
-      where: { title: { contains: query, mode: "insensitive" } },
-      take: SEARCH_FETCH_LIMIT, orderBy: { views: "desc" },
-    }),
-  ]);
+  const hits = await searchContent(query, SEARCH_FETCH_LIMIT);
 
-  if (movies.length === 0 && serials.length === 0) {
+  if (hits.length === 0) {
     // Natija topilmasa — AI yordamchiga yo'naltiramiz (inline qidiruv aynan shu
     // so'rovni qayta yuborib, kafolatlangan holda yana hech narsa topmasdi)
     ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiSeedQuery: query };
     const kb = new InlineKeyboard()
-      .text("🤖 AI orqali qidirish", "search:ai").row()
+      .text("🤖 AI orqali qidirish", "search:ai")
+      .row()
       .text("Ko'p ko'rilganlar", "popular:page:0");
     await ctx.reply(
       `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> "<b>${e.escapeHtml(query)}</b>" topilmadi.\n\nAI yordamchidan so'rang yoki mashhur kinolarni sinab ko'ring:`,
@@ -173,11 +172,16 @@ async function searchByName(ctx: MyContext, query: string) {
     return;
   }
 
-  const items: SearchItem[] = [
-    ...movies.map((m): SearchItem => ({ id: m.id, kind: "movie", code: m.code, title: m.title })),
-    ...serials.map((s): SearchItem => ({ id: s.id, kind: "serial", code: s.code, title: s.title })),
-  ];
-  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), searchResults: { query, items } as SearchState };
+  const items: SearchItem[] = hits.map((h): SearchItem => ({
+    id: h.id,
+    kind: h.kind,
+    code: h.code,
+    title: h.title,
+  }));
+  ctx.session.scratch = {
+    ...(ctx.session.scratch ?? {}),
+    searchResults: { query, items } as SearchState,
+  };
   await renderSearchResults(ctx, 0, false);
 }
 
@@ -229,22 +233,22 @@ searchHandler.callbackQuery("search:ai", async (ctx) => {
   await enterAiChat(ctx, seed);
 });
 
-// Natijadan kino
-// Gate shu yerda ham kerak: qidiruv natijasidagi ro'yxatdan ketma-ket bosib,
-// bitta so'rov hisobiga cheksiz kino olish mumkin edi.
+// Natijadan kino — to'liq gate (obuna → bepul limit → premium) delivery.ts ichida.
+// Ketma-ket bosib bitta so'rov hisobiga cheksiz kino olishga yo'l yo'q.
 searchHandler.callbackQuery(/^movie:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   const movie = await prisma.movie.findUnique({ where: { id } });
   await ctx.answerCallbackQuery();
-  if (!movie) { await ctx.reply("❌ Kino topilmadi."); return; }
-  if (!(await checkAccess(ctx))) return;
-  if (await sendMovie(ctx, movie)) await countContentRequest(ctx);
+  if (!movie) {
+    await ctx.reply("❌ Kino topilmadi.");
+    return;
+  }
+  await deliverMovie(ctx, movie);
 });
 
-// Natijadan serial (sezonlar ro'yxati — video emas, shuning uchun hisoblanmaydi)
+// Natijadan serial (sezonlar ro'yxati — video emas, hisoblanmaydi)
 searchHandler.callbackQuery(/^serial:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   await ctx.answerCallbackQuery();
-  if (!(await checkAccess(ctx))) return;
-  await sendSerialSeasons(ctx, id);
+  await deliverSerialSeasons(ctx, id);
 });

@@ -5,8 +5,11 @@ import { getGlobalButton, getBool, getSetting, KEYS } from "../utils/settings.js
 import { isPremiumActive } from "../utils/premium.js";
 import { sendPremiumPrompt } from "../handlers/premiumUser.js";
 import { movieChannelCaption } from "./movieChannel.js";
+import { formatError, log, notifyOwner } from "../utils/logger.js";
+import { RECOMMEND_CALLBACK } from "./recommend.js";
+import { ce, e } from "../utils/emoji.js";
 import type { MyContext } from "../types.js";
-import type { Movie, Serial } from "@prisma/client";
+import type { Movie, Serial, Episode } from "@prisma/client";
 
 /** Kino caption (bot ichida) — premium emojili format, janr ikonkasi doimiy 🎭 */
 export function movieCaption(m: Movie): string {
@@ -53,41 +56,89 @@ export async function ensurePremiumSerialAccess(ctx: MyContext, serial: Serial):
 }
 
 /**
- * Tasodifiy kino tanlaydi. Premium bo'lmagan foydalanuvchi uchun premium
- * kinolar tanlov hovuzidan chiqarib tashlanadi — aks holda "tasodifiy" tugma
- * ba'zan kino o'rniga to'lov taklifiga olib kelardi.
+ * Kinoni yuboradi. Premium kino bo'lib, foydalanuvchi premium bo'lmasa —
+ * yubormaydi (false). Video yuborish muvaffaqiyatsiz bo'lsa (bloklangan user,
+ * eskirgan file_id) views OSHIRILMAYDI — jimgina muvaffaqiyatsizlik o'rniga
+ * log + owner bildirishnomasi chiqadi.
  */
-export async function pickRandomMovie(ctx: MyContext): Promise<Movie | null> {
-  const uid = ctx.from?.id;
-  let allowPremium = !!uid && isAdmin(uid);
-  if (!allowPremium && uid) {
-    const user = await prisma.user.findUnique({ where: { id: BigInt(uid) } });
-    allowPremium = isPremiumActive(user?.premiumUntil);
-  }
-
-  const where = allowPremium ? {} : { isPremium: false };
-  const total = await prisma.movie.count({ where });
-  if (total === 0) return null;
-  const skip = Math.floor(Math.random() * total);
-  const [movie] = await prisma.movie.findMany({ where, skip, take: 1 });
-  return movie ?? null;
-}
-
-/** Kinoni yuboradi. Premium kino bo'lib, foydalanuvchi premium bo'lmasa — yubormaydi (false). */
 export async function sendMovie(ctx: MyContext, movie: Movie): Promise<boolean> {
   if (!(await ensurePremiumMovieAccess(ctx, movie))) return false;
 
   const enabled = await getBool(KEYS.movieBtnEnabled, true);
   const globalBtn = enabled ? await getGlobalButton("movie") : null;
-  await ctx.replyWithVideo(movie.fileId, {
-    caption: movieCaption(movie),
-    reply_markup: globalBtn ? contentButtonMarkup(globalBtn) : undefined,
-  });
-  await prisma.movie.update({
-    where: { id: movie.id },
-    data: { views: { increment: 1 } },
-  });
+  // Video ostida global knopka + tavsiya tugmasi. Tavsiya doim ko'rsatiladi —
+  // sovuq foydalanuvchi uchun top-views ro'yxatini ochadi (foydasiz emas).
+  const recommendRow = [{ text: "🎯 Sizga yoqishi mumkin", callback_data: RECOMMEND_CALLBACK }];
+  try {
+    await ctx.replyWithVideo(movie.fileId, {
+      caption: movieCaption(movie),
+      reply_markup: contentButtonMarkup(globalBtn ?? {}, [recommendRow]),
+    });
+  } catch (err) {
+    log("warn", "Kino yuborilmadi", {
+      userId: ctx.from?.id?.toString(),
+      movieId: movie.id,
+      error: formatError(err),
+    });
+    await notifyOwner(
+      `⚠️ Kino yuborilmadi: "${movie.title}" (id:${movie.id})\n${formatError(err)}`,
+      "movie-send"
+    );
+    // Jim muvaffaqiyatsizlik emas — foydalanuvchiga ham xabar ko'rsatamiz
+    await ctx
+      .reply("❌ Videoni yuborishda xato yuz berdi. Qaytadan urinib ko'ring yoki admin bilan bog'laning.")
+      .catch(() => {});
+    return false;
+  }
+
+  await prisma.movie
+    .update({
+      where: { id: movie.id },
+      data: { views: { increment: 1 } },
+    })
+    .catch((err) => {
+      log("warn", "Kino views oshmadi", { movieId: movie.id, error: formatError(err) });
+    });
   await sendPostDeliveryMessage(ctx);
+  return true;
+}
+
+/** Serial episodini yuboradi (premium gate bilan). Muvaffaqiyatga bog'liq. */
+export async function sendEpisode(
+  ctx: MyContext,
+  episode: Episode,
+  serial: Serial,
+  seasonNumber: number
+): Promise<boolean> {
+  if (!(await ensurePremiumSerialAccess(ctx, serial))) return false;
+
+  const enabled = await getBool(KEYS.serialBtnEnabled, true);
+  const globalBtn = enabled ? await getGlobalButton("serial") : null;
+  const caption =
+    `${ce("tv")} <b>${e.escapeHtml(serial.title)}</b>\n` +
+    `${seasonNumber}-sezon · ${episode.number}-qism` +
+    (episode.title ? `\n${e.escapeHtml(episode.title)}` : "");
+
+  try {
+    await ctx.replyWithVideo(episode.fileId, {
+      caption,
+      reply_markup: globalBtn ? contentButtonMarkup(globalBtn) : undefined,
+    });
+  } catch (err) {
+    log("warn", "Serial episodi yuborilmadi", {
+      userId: ctx.from?.id?.toString(),
+      episodeId: episode.id,
+      error: formatError(err),
+    });
+    await notifyOwner(
+      `⚠️ Serial episodi yuborilmadi (ep:${episode.id})\n${formatError(err)}`,
+      "episode-send"
+    );
+    await ctx
+      .reply("❌ Qismni yuborishda xato yuz berdi. Qaytadan urinib ko'ring yoki admin bilan bog'laning.")
+      .catch(() => {});
+    return false;
+  }
   return true;
 }
 
@@ -98,12 +149,14 @@ async function sendPostDeliveryMessage(ctx: MyContext): Promise<void> {
   const text = await getSetting(KEYS.postDeliveryText, "");
   if (!text.trim()) return;
 
-  const btnText  = await getSetting(KEYS.postDeliveryBtnText, "");
-  const btnUrl   = await getSetting(KEYS.postDeliveryBtnUrl, "");
+  const btnText = await getSetting(KEYS.postDeliveryBtnText, "");
+  const btnUrl = await getSetting(KEYS.postDeliveryBtnUrl, "");
   const btnStyle = await getSetting(KEYS.postDeliveryBtnStyle, "primary");
   const row = contentButtonRow({ buttonText: btnText, buttonUrl: btnUrl, buttonStyle: btnStyle });
 
-  await ctx.reply(text, {
-    reply_markup: row ? { inline_keyboard: [row] } : undefined,
-  }).catch(() => {});
+  await ctx
+    .reply(text, {
+      reply_markup: row ? { inline_keyboard: [row] } : undefined,
+    })
+    .catch(() => {});
 }

@@ -13,8 +13,8 @@ interface Provider {
   id: ProviderId;
   label: string;
   style: "openai" | "gemini";
-  baseUrl: string;          // OpenAI-mos uchun to'liq chat completions URL
-  key: () => string;        // API kalit (bo'sh bo'lsa — mavjud emas)
+  baseUrl: string; // OpenAI-mos uchun to'liq chat completions URL
+  key: () => string; // API kalit (bo'sh bo'lsa — mavjud emas)
   models: { id: string; label: string }[];
 }
 
@@ -27,8 +27,8 @@ export const PROVIDERS: Provider[] = [
     key: () => config.groqApiKey,
     models: [
       { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (sifatli)" },
-      { id: "llama-3.1-8b-instant",    label: "Llama 3.1 8B (tez, katta limit)" },
-      { id: "groq/compound-mini",      label: "Compound Mini" },
+      { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B (tez, katta limit)" },
+      { id: "groq/compound-mini", label: "Compound Mini" },
     ],
   },
   {
@@ -39,9 +39,12 @@ export const PROVIDERS: Provider[] = [
     key: () => config.openrouterApiKey,
     models: [
       { id: "nvidia/nemotron-3-ultra-550b-a55b:free", label: "Nemotron 3 Ultra 550B (free)" },
-      { id: "google/gemma-4-26b-a4b-it:free",         label: "Gemma 4 26B — rasm ham (free)" },
-      { id: "nvidia/nemotron-nano-12b-v2-vl:free",    label: "Nemotron Nano 12B VL — rasm ham (free)" },
-      { id: "openrouter/free",                        label: "OpenRouter Auto (free)" },
+      { id: "google/gemma-4-26b-a4b-it:free", label: "Gemma 4 26B — rasm ham (free)" },
+      {
+        id: "nvidia/nemotron-nano-12b-v2-vl:free",
+        label: "Nemotron Nano 12B VL — rasm ham (free)",
+      },
+      { id: "openrouter/free", label: "OpenRouter Auto (free)" },
     ],
   },
   {
@@ -52,7 +55,7 @@ export const PROVIDERS: Provider[] = [
     key: () => config.cerebrasApiKey,
     models: [
       { id: "llama-3.3-70b", label: "Llama 3.3 70B (juda tez)" },
-      { id: "llama3.1-8b",   label: "Llama 3.1 8B" },
+      { id: "llama3.1-8b", label: "Llama 3.1 8B" },
     ],
   },
   {
@@ -62,9 +65,9 @@ export const PROVIDERS: Provider[] = [
     baseUrl: "https://models.github.ai/inference/chat/completions",
     key: () => config.githubModelsToken,
     models: [
-      { id: "openai/gpt-4.1-mini",         label: "GPT-4.1 mini — eng sifatli, rasm ham" },
-      { id: "openai/gpt-4o-mini",          label: "GPT-4o mini — rasm ham" },
-      { id: "openai/gpt-4o",               label: "GPT-4o — kuchli, limit past" },
+      { id: "openai/gpt-4.1-mini", label: "GPT-4.1 mini — eng sifatli, rasm ham" },
+      { id: "openai/gpt-4o-mini", label: "GPT-4o mini — rasm ham" },
+      { id: "openai/gpt-4o", label: "GPT-4o — kuchli, limit past" },
       { id: "meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
     ],
   },
@@ -85,9 +88,7 @@ export const PROVIDERS: Provider[] = [
     style: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
     key: () => config.geminiApiKey,
-    models: [
-      { id: "gemini-2.0-flash",     label: "Gemini 2.0 Flash" },
-    ],
+    models: [{ id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" }],
   },
 ];
 
@@ -125,14 +126,17 @@ interface AiResult {
   tokens: number;
 }
 
-export interface ChatMsg { role: "user" | "assistant"; content: string }
+export interface ChatMsg {
+  role: "user" | "assistant";
+  content: string;
+}
 
 export interface AiCallOpts {
   system?: string;
   history?: ChatMsg[];
   userText: string;
   imageDataUrl?: string; // "data:image/jpeg;base64,...."
-  maxTokens?: number;    // standart 800; qisqa ichki so'rovlar (masalan kalit so'z ajratish) uchun kamaytiriladi
+  maxTokens?: number; // standart 800; qisqa ichki so'rovlar (masalan kalit so'z ajratish) uchun kamaytiriladi
 }
 
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -174,13 +178,13 @@ async function fetchResilient(url: string, init: RequestInit): Promise<Response>
 // past kunlik limiti bu yerda muammo emas (matn oqimida esa Groq birinchi
 // turadi — u yerda hajm muhimroq).
 const VISION_MODELS: { provider: ProviderId; model: string }[] = [
-  { provider: "github",     model: "openai/gpt-4.1-mini" },
-  { provider: "github",     model: "openai/gpt-4o-mini" },
+  { provider: "github", model: "openai/gpt-4.1-mini" },
+  { provider: "github", model: "openai/gpt-4o-mini" },
   { provider: "openrouter", model: "google/gemma-4-26b-a4b-it:free" },
   { provider: "openrouter", model: "nvidia/nemotron-nano-12b-v2-vl:free" },
-  { provider: "mistral",    model: "pixtral-12b-latest" },
+  { provider: "mistral", model: "pixtral-12b-latest" },
   { provider: "openrouter", model: "openrouter/free" },
-  { provider: "gemini",     model: "gemini-2.0-flash" },
+  { provider: "gemini", model: "gemini-2.0-flash" },
 ];
 
 function parseDataUrl(dataUrl: string): { mime: string; base64: string } | null {
@@ -209,7 +213,12 @@ async function callOpenAI(p: Provider, model: string, opts: AiCallOpts): Promise
     const res = await fetchResilient(p.baseUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key()}` },
-      body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: opts.maxTokens ?? 800 }),
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.7,
+        max_tokens: opts.maxTokens ?? 800,
+      }),
     });
 
     const rl: Record<string, string> = {};
@@ -276,8 +285,11 @@ async function callGemini(p: Provider, model: string, opts: AiCallOpts): Promise
     const data: any = await res.json();
     const parts = data?.candidates?.[0]?.content?.parts;
     if (!Array.isArray(parts)) return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const text = parts.map((x: any) => x.text ?? "").join("").trim();
+    const text = parts
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((x: any) => x.text ?? "")
+      .join("")
+      .trim();
     if (!text) return null;
     const tokens = data?.usageMetadata?.totalTokenCount ?? 0;
     lastProviderError.delete(p.id);
@@ -289,7 +301,11 @@ async function callGemini(p: Provider, model: string, opts: AiCallOpts): Promise
   }
 }
 
-async function callProvider(p: Provider, model: string, opts: AiCallOpts): Promise<AiResult | null> {
+async function callProvider(
+  p: Provider,
+  model: string,
+  opts: AiCallOpts
+): Promise<AiResult | null> {
   if (!p.key()) return null;
   return p.style === "gemini" ? callGemini(p, model, opts) : callOpenAI(p, model, opts);
 }
@@ -305,7 +321,10 @@ async function buildTextOrder(scope: "user" | "admin"): Promise<{ p: Provider; m
     const [pid, ...rest] = selected.split(":");
     const model = rest.join(":");
     const p = available.find((x) => x.id === pid);
-    if (p && model) { order.push({ p, model }); tried.add(`${pid}:${model}`); }
+    if (p && model) {
+      order.push({ p, model });
+      tried.add(`${pid}:${model}`);
+    }
   }
   for (const p of available) {
     const model = p.models[0]?.id;
@@ -318,14 +337,20 @@ async function buildTextOrder(scope: "user" | "admin"): Promise<{ p: Provider; m
   return order;
 }
 
-async function runChain(order: { p: Provider; model: string }[], opts: AiCallOpts): Promise<string | null> {
+async function runChain(
+  order: { p: Provider; model: string }[],
+  opts: AiCallOpts
+): Promise<string | null> {
   if (order.length === 0) {
     console.error("🤖 AI so'rovi keldi, lekin mos provayder yo'q!");
     return null;
   }
   for (const { p, model } of order) {
     const r = await callProvider(p, model, opts);
-    if (r) { recordUsage(r.provider, r.model, r.tokens); return r.text; }
+    if (r) {
+      recordUsage(r.provider, r.model, r.tokens);
+      return r.text;
+    }
   }
   return null;
 }
@@ -337,7 +362,11 @@ export async function askAIChat(scope: "user" | "admin", opts: AiCallOpts): Prom
 }
 
 /** Oddiy bir martalik matn so'rovi (eski imzo saqlanadi) */
-export async function askAI(scope: "user" | "admin", userText: string, system?: string): Promise<string | null> {
+export async function askAI(
+  scope: "user" | "admin",
+  userText: string,
+  system?: string
+): Promise<string | null> {
   return askAIChat(scope, { userText, system });
 }
 
@@ -357,13 +386,22 @@ export async function askVision(opts: AiCallOpts): Promise<string | null> {
 
 /** Vision imkoniyati bormi (biror vision-provayder kaliti bor) */
 export function visionEnabled(): boolean {
-  return VISION_MODELS.some((vm) => { const p = getProvider(vm.provider); return p && !!p.key(); });
+  return VISION_MODELS.some((vm) => {
+    const p = getProvider(vm.provider);
+    return p && !!p.key();
+  });
 }
 
 // ─── Usage tracking (B2'da DB'ga ulanadi; hozircha callback) ─────────────────
 type UsageSink = (provider: ProviderId, model: string, tokens: number) => void;
 let usageSink: UsageSink | null = null;
-export function setUsageSink(sink: UsageSink) { usageSink = sink; }
+export function setUsageSink(sink: UsageSink) {
+  usageSink = sink;
+}
 function recordUsage(provider: ProviderId, model: string, tokens: number) {
-  try { usageSink?.(provider, model, tokens); } catch { /* ignore */ }
+  try {
+    usageSink?.(provider, model, tokens);
+  } catch {
+    /* ignore */
+  }
 }

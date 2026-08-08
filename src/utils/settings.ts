@@ -1,12 +1,19 @@
 import { prisma } from "../prisma.js";
 
-const cache = new Map<string, string>();
+// Kesh TTL (3.4): har kalit 5 daqiqa. Admin AI orqali sozlamani o'zgartirsa
+// `setSetting` keshni darhol yangilaydi — latensiya bo'lmasligi uchun.
+// Boshqa tomondan, cheksiz o'sish va eskirgan qiymatlar ham yo'q (TTL).
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+type CacheEntry = { value: string; expiresAt: number };
+const cache = new Map<string, CacheEntry>();
 
 export async function getSetting(key: string, def = ""): Promise<string> {
-  if (cache.has(key)) return cache.get(key)!;
+  const hit = cache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
   const row = await prisma.setting.findUnique({ where: { key } });
   const val = row?.value ?? def;
-  cache.set(key, val);
+  cache.set(key, { value: val, expiresAt: Date.now() + CACHE_TTL_MS });
   return val;
 }
 
@@ -16,7 +23,8 @@ export async function setSetting(key: string, value: string): Promise<void> {
     create: { key, value },
     update: { value },
   });
-  cache.set(key, value);
+  // Keshni darhol yangilaymiz — AI [SETTING:] keyingi so'rovda eski qiymatni ko'rmasin
+  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
 export async function getBool(key: string, def = false): Promise<boolean> {
@@ -33,37 +41,38 @@ export function clearSettingsCache(): void {
 }
 
 export const KEYS = {
-  forceSubEnabled:  "force_sub_enabled",
-  movieBtnText:     "movie_btn_text",
-  movieBtnUrl:      "movie_btn_url",
-  movieBtnStyle:    "movie_btn_style",
-  serialBtnText:    "serial_btn_text",
-  serialBtnUrl:     "serial_btn_url",
-  serialBtnStyle:   "serial_btn_style",
-  subCheckBtnText:  "sub_check_btn_text",
+  forceSubEnabled: "force_sub_enabled",
+  movieBtnText: "movie_btn_text",
+  movieBtnUrl: "movie_btn_url",
+  movieBtnStyle: "movie_btn_style",
+  serialBtnText: "serial_btn_text",
+  serialBtnUrl: "serial_btn_url",
+  serialBtnStyle: "serial_btn_style",
+  subCheckBtnText: "sub_check_btn_text",
   subCheckBtnStyle: "sub_check_btn_style",
   subChannelBtnLabel: "sub_channel_btn_label",
-  movieBtnEnabled:  "movie_btn_enabled",
+  movieBtnEnabled: "movie_btn_enabled",
   serialBtnEnabled: "serial_btn_enabled",
   autoBackupEnabled: "auto_backup_enabled",
-  lastBackupAt:      "last_backup_at",
-  aiUserModel:       "ai_user_model",   // "provider:model" — foydalanuvchi AI scope'i
-  aiAdminModel:      "ai_admin_model",  // "provider:model" — admin AI scope'i
-  premiumEnabled:    "premium_enabled",     // premium/limit tizimi yoq/o'chir
-  freeRequestLimit:  "free_request_limit",  // bepul kino so'rovlari soni (0 = cheksiz)
-  freeDays:          "free_days",           // bepul kunlar (0 = cheksiz)
-  freeAiLimit:       "free_ai_limit",       // bepul kunlik AI so'rovlari (0 = cheksiz)
-  paymentInfo:       "payment_info",        // Karta orqali to'lov ko'rsatmasi (karta raqami va h.k.)
-  paymentInfoTon:    "payment_info_ton",    // TON orqali to'lov ko'rsatmasi (wallet manzili va h.k.)
+  lastBackupAt: "last_backup_at",
+  aiUserModel: "ai_user_model", // "provider:model" — foydalanuvchi AI scope'i
+  aiAdminModel: "ai_admin_model", // "provider:model" — admin AI scope'i
+  premiumEnabled: "premium_enabled", // premium/limit tizimi yoq/o'chir
+  freeRequestLimit: "free_request_limit", // bepul kino so'rovlari soni (0 = cheksiz)
+  freeDays: "free_days", // bepul kunlar (0 = cheksiz)
+  freeDailyLimit: "free_daily_limit", // KUNLIK bepul kino so'rovlari (0 = o'chirilgan; Toshkent kuni)
+  freeAiLimit: "free_ai_limit", // bepul kunlik AI so'rovlari (0 = cheksiz)
+  paymentInfo: "payment_info", // Karta orqali to'lov ko'rsatmasi (karta raqami va h.k.)
+  paymentInfoTon: "payment_info_ton", // TON orqali to'lov ko'rsatmasi (wallet manzili va h.k.)
   premiumWarnEnabled: "premium_warn_enabled", // premium tugashi haqida ogohlantirish (default: yoqilgan)
   referralRewardCount: "referral_reward_count", // necha referal uchun mukofot (0 = o'chirilgan)
-  referralRewardDays:  "referral_reward_days",  // necha kun premium beriladi
-  postDeliveryEnabled: "post_delivery_enabled",  // kino yuborilgach qo'shimcha post yoq/o'chir
-  postDeliveryText:    "post_delivery_text",     // qo'shimcha post matni (masalan APK reklama)
+  referralRewardDays: "referral_reward_days", // necha kun premium beriladi
+  postDeliveryEnabled: "post_delivery_enabled", // kino yuborilgach qo'shimcha post yoq/o'chir
+  postDeliveryText: "post_delivery_text", // qo'shimcha post matni (masalan APK reklama)
   postDeliveryBtnText: "post_delivery_btn_text", // qo'shimcha post knopkasi matni
-  postDeliveryBtnUrl:  "post_delivery_btn_url",  // qo'shimcha post knopkasi havolasi
-  postDeliveryBtnStyle:"post_delivery_btn_style",// qo'shimcha post knopkasi rangi
-  geoDetectEnabled:  "geo_detect_enabled", // viloyat so'rovnomasida GPS orqali avto-aniqlash tugmasi
+  postDeliveryBtnUrl: "post_delivery_btn_url", // qo'shimcha post knopkasi havolasi
+  postDeliveryBtnStyle: "post_delivery_btn_style", // qo'shimcha post knopkasi rangi
+  geoDetectEnabled: "geo_detect_enabled", // viloyat so'rovnomasida GPS orqali avto-aniqlash tugmasi
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,12 +86,12 @@ export interface ControllableSetting {
 }
 
 export const AI_CONTROLLABLE: ControllableSetting[] = [
-  { key: KEYS.forceSubEnabled,    label: "Majburiy obuna (yoq/o'chir)", type: "bool" },
-  { key: KEYS.subCheckBtnText,    label: "Tekshirish tugmasi matni",     type: "text" },
+  { key: KEYS.forceSubEnabled, label: "Majburiy obuna (yoq/o'chir)", type: "bool" },
+  { key: KEYS.subCheckBtnText, label: "Tekshirish tugmasi matni", type: "text" },
   { key: KEYS.subChannelBtnLabel, label: "Kanal obuna tugmasi yorlig'i", type: "text" },
-  { key: KEYS.aiUserModel,        label: "Foydalanuvchi AI modeli (provider:model)", type: "text" },
-  { key: KEYS.aiAdminModel,       label: "Admin AI modeli (provider:model)", type: "text" },
-  { key: KEYS.autoBackupEnabled,  label: "Avto backup (yoq/o'chir)",     type: "bool" },
+  { key: KEYS.aiUserModel, label: "Foydalanuvchi AI modeli (provider:model)", type: "text" },
+  { key: KEYS.aiAdminModel, label: "Admin AI modeli (provider:model)", type: "text" },
+  { key: KEYS.autoBackupEnabled, label: "Avto backup (yoq/o'chir)", type: "bool" },
 ];
 
 export function findControllable(key: string): ControllableSetting | undefined {
@@ -95,7 +104,9 @@ export async function applyControllable(key: string, rawValue: string): Promise<
   if (!spec) return false;
   const v = rawValue.trim();
   if (spec.type === "bool") {
-    const on = /^(1|true|yoq|yoqilgan|ha|on|enable)/i.test(v) && !/^(0|false|o'chir|yo'q|off|disable)/i.test(v);
+    const on =
+      /^(1|true|yoq|yoqilgan|ha|on|enable)/i.test(v) &&
+      !/^(0|false|o'chir|yo'q|off|disable)/i.test(v);
     await setBool(key, on);
   } else if (spec.type === "int") {
     const n = parseInt(v, 10);
@@ -108,8 +119,8 @@ export async function applyControllable(key: string, rawValue: string): Promise<
 }
 
 export async function getGlobalButton(prefix: "movie" | "serial") {
-  const textKey  = prefix === "movie" ? KEYS.movieBtnText  : KEYS.serialBtnText;
-  const urlKey   = prefix === "movie" ? KEYS.movieBtnUrl   : KEYS.serialBtnUrl;
+  const textKey = prefix === "movie" ? KEYS.movieBtnText : KEYS.serialBtnText;
+  const urlKey = prefix === "movie" ? KEYS.movieBtnUrl : KEYS.serialBtnUrl;
   const styleKey = prefix === "movie" ? KEYS.movieBtnStyle : KEYS.serialBtnStyle;
   const [text, url, style] = await Promise.all([
     getSetting(textKey),
@@ -117,8 +128,8 @@ export async function getGlobalButton(prefix: "movie" | "serial") {
     getSetting(styleKey, "primary"),
   ]);
   return {
-    buttonText:  text  || null,
-    buttonUrl:   url   || null,
+    buttonText: text || null,
+    buttonUrl: url || null,
     buttonStyle: style || "primary",
   };
 }

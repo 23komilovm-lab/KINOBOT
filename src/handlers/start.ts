@@ -1,14 +1,12 @@
 import { Composer } from "grammy";
-import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { adminMenuKeyboard, kb } from "../utils/keyboard.js";
 import { getUnsubscribedChannels } from "../utils/subscription.js";
-import { checkContentAccess, countContentRequest } from "../utils/access.js";
-import { attachReferrer, confirmReferral } from "../utils/referral.js";
+import { attachReferrer } from "../utils/referral.js";
 import { sendReferralInfo } from "./referral.js";
-import { sendMovie, pickRandomMovie } from "../services/media.js";
+import { weightedRandomMovie } from "../services/recommend.js";
+import { deliverByCode, deliverMovie } from "../services/delivery.js";
 import { sendPremiumPrompt } from "./premiumUser.js";
-import { sendSerialSeasons } from "./serialView.js";
 import type { MyContext } from "../types.js";
 
 export const startHandler = new Composer<MyContext>();
@@ -22,26 +20,33 @@ const WELCOME =
 function welcomeKeyboard() {
   return kb(
     [
-      { text: "AI yordamchi", callback_data: "ai:enter", icon_custom_emoji_id: "5258093637450866522" },
+      {
+        text: "AI yordamchi",
+        callback_data: "ai:enter",
+        icon_custom_emoji_id: "5258093637450866522",
+      },
     ],
     [
-      { text: "Referal", callback_data: "start:referal", icon_custom_emoji_id: "5258513401784573443" },
-      { text: "Mashhur", callback_data: "popular:page:0", icon_custom_emoji_id: "5258391252914676042" },
+      {
+        text: "Referal",
+        callback_data: "start:referal",
+        icon_custom_emoji_id: "5258513401784573443",
+      },
+      {
+        text: "Mashhur",
+        callback_data: "popular:page:0",
+        icon_custom_emoji_id: "5258391252914676042",
+      },
     ],
     [
-      { text: "Random", callback_data: "start:random", icon_custom_emoji_id: "5210771709258394044" },
+      {
+        text: "Random",
+        callback_data: "start:random",
+        icon_custom_emoji_id: "5210771709258394044",
+      },
       { text: "Kino kanali", url: CHANNEL_URL, icon_custom_emoji_id: "5260268501515377807" },
-    ],
+    ]
   );
-}
-
-/** Kod bo'yicha kino YOKI serialni yuboradi (obuna/premium tekshiruvidan keyin) */
-export async function deliverByCode(ctx: MyContext, code: number): Promise<boolean> {
-  const movie = await prisma.movie.findUnique({ where: { code } });
-  if (movie) { await sendMovie(ctx, movie); return true; }
-  const serial = await prisma.serial.findUnique({ where: { code } });
-  if (serial) { await sendSerialSeasons(ctx, serial.id); return true; }
-  return false;
 }
 
 // Welcome — buyruq tugmalari (AI, Referal, Mashhur, Random, Kanal) inline
@@ -65,7 +70,10 @@ startHandler.command("start", async (ctx) => {
     if (Number.isInteger(refId)) await attachReferrer(uid, refId);
   } else if (payload === "premium") {
     // Inline rejimdagi "Bepul chegara tugadi — Premium olish" tugmasidan
-    if (!isAdmin(uid)) { await sendPremiumPrompt(ctx); return; }
+    if (!isAdmin(uid)) {
+      await sendPremiumPrompt(ctx);
+      return;
+    }
   }
 
   // Admin — qisqa xabar + knopkalar
@@ -76,17 +84,13 @@ startHandler.command("start", async (ctx) => {
     return;
   }
 
-  // Deep-link kino — premium/majburiy obuna/limit tekshiruvi
-  // (so'rov faqat kino haqiqatan yetkazilgandan keyin hisoblanadi)
+  // Deep-link kino — to'liq gate (obuna → bepul limit → premium) delivery.ts ichida.
+  // Gate o'tmasa bloklovchi xabar ko'rsatiladi; obuna bo'lsa pendingCode saqlanadi
+  // (sub:check qayta yetkazadi). Kod topilmasa — welcome ko'rsatiladi.
   if (pendingCode !== null) {
-    const ok = await checkContentAccess(ctx, false);
-    if (!ok) {
-      ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pendingCode };
-      return;
-    }
-    await confirmReferral(ctx, uid);
-    const delivered = await deliverByCode(ctx, pendingCode);
-    if (delivered) { await countContentRequest(ctx); return; }
+    const res = await deliverByCode(ctx, pendingCode);
+    if (res.delivered) return;
+    if (!res.ok) return;
   }
 
   // Oddiy /start — chiroyli welcome (obuna kod yozilganda tekshiriladi)
@@ -98,19 +102,21 @@ startHandler.command("start", async (ctx) => {
 startHandler.callbackQuery("sub:check", async (ctx) => {
   const uid = ctx.from.id;
   const notJoined = await getUnsubscribedChannels(ctx, uid, { bypassCache: true });
-  const blocking  = notJoined.filter((c) => c.type !== "INSTAGRAM");
+  const blocking = notJoined.filter((c) => c.type !== "INSTAGRAM");
 
   if (blocking.length === 0) {
     await ctx.answerCallbackQuery({ text: "✅ Rahmat! Endi foydalanishingiz mumkin." });
     await ctx.deleteMessage().catch(() => {});
-    await confirmReferral(ctx, uid);
 
-    // Obuna oldidan so'ralgan kino/serial bo'lsa — yetkazamiz
+    // Obuna oldidan so'ralgan kino/serial bo'lsa — to'liq gate QAYTA ishlaydi
+    // (obuna o'rtasida bepul limit tugagan bo'lishi mumkin). Kvota bloklasa
+    // pendingCode qayta saqlanadi va premium taklifi ko'rsatiladi.
     const pending = ctx.session.scratch?.pendingCode as number | undefined;
     if (typeof pending === "number") {
       if (ctx.session.scratch) delete ctx.session.scratch.pendingCode;
-      const ok = await deliverByCode(ctx, pending);
-      if (ok) { await countContentRequest(ctx); return; }
+      const res = await deliverByCode(ctx, pending);
+      if (res.delivered) return;
+      if (!res.ok) return;
     }
 
     await sendWelcome(ctx);
@@ -129,8 +135,10 @@ startHandler.callbackQuery("start:referal", async (ctx) => {
 
 startHandler.callbackQuery("start:random", async (ctx) => {
   await ctx.answerCallbackQuery();
-  if (!(await checkContentAccess(ctx, false))) return;
-  const movie = await pickRandomMovie(ctx);
-  if (!movie) { await ctx.reply("📭 Hozircha kino yo'q."); return; }
-  if (await sendMovie(ctx, movie)) await countContentRequest(ctx);
+  const movie = await weightedRandomMovie(ctx);
+  if (!movie) {
+    await ctx.reply("📭 Hozircha kino yo'q.");
+    return;
+  }
+  await deliverMovie(ctx, movie);
 });

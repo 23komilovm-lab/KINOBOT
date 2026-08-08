@@ -30,10 +30,12 @@ export async function attachReferrer(userId: number, referrerId: number): Promis
   const referrer = await prisma.user.findUnique({ where: { id: BigInt(referrerId) } });
   if (!referrer) return;
 
-  await prisma.user.update({
-    where: { id: BigInt(userId) },
-    data: { referredById: BigInt(referrerId) },
-  }).catch(() => null);
+  await prisma.user
+    .update({
+      where: { id: BigInt(userId) },
+      data: { referredById: BigInt(referrerId) },
+    })
+    .catch(() => null);
 }
 
 /**
@@ -44,10 +46,12 @@ export async function confirmReferral(ctx: MyContext, userId: number): Promise<v
   const user = await prisma.user.findUnique({ where: { id: BigInt(userId) } });
   if (!user || !user.referredById || user.referralConfirmed) return;
 
-  await prisma.user.update({
-    where: { id: BigInt(userId) },
-    data: { referralConfirmed: true },
-  }).catch(() => null);
+  await prisma.user
+    .update({
+      where: { id: BigInt(userId) },
+      data: { referralConfirmed: true },
+    })
+    .catch(() => null);
 
   // Referrerga xabar
   const count = await prisma.user.count({
@@ -71,12 +75,15 @@ export async function confirmReferral(ctx: MyContext, userId: number): Promise<v
     rewardText = `\n\n🎁 Yana <b>${left}</b> ta do'st — va <b>${reward.days} kun Premium</b> sovg'a!`;
   }
 
-  await ctx.api.sendMessage(
-    Number(user.referredById),
-    `🎉 <b>Yangi referal!</b>\n\nSizning havolangiz orqali yangi foydalanuvchi qo'shildi.\n` +
-    `Jami referallaringiz: <b>${count}</b> ta` + rewardText,
-    { parse_mode: "HTML" }
-  ).catch(() => null);
+  await ctx.api
+    .sendMessage(
+      Number(user.referredById),
+      `🎉 <b>Yangi referal!</b>\n\nSizning havolangiz orqali yangi foydalanuvchi qo'shildi.\n` +
+        `Jami referallaringiz: <b>${count}</b> ta` +
+        rewardText,
+      { parse_mode: "HTML" }
+    )
+    .catch(() => null);
 }
 
 /** Foydalanuvchining tasdiqlangan referallar soni */

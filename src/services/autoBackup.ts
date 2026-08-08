@@ -14,21 +14,28 @@ const bigintReplacer = (_key: string, value: unknown) =>
  * Telegram Bot API hujjat yuborish limiti 50MB; JSON matn odatda 5-10x
  * siqiladi, shuning uchun bu limitga yetish ehtimolini sezilarli kamaytiradi.
  */
-export async function buildBackupFile(): Promise<{ file: InputFile; fileName: string; counts: Record<string, number> }> {
-  const [movies, serials, seasons, episodes, channels, users, settings] =
-    await Promise.all([
-      prisma.movie.findMany(),
-      prisma.serial.findMany(),
-      prisma.season.findMany(),
-      prisma.episode.findMany(),
-      prisma.channel.findMany(),
-      prisma.user.findMany(),
-      prisma.setting.findMany(),
-    ]);
+export async function buildBackupFile(): Promise<{
+  file: InputFile;
+  fileName: string;
+  counts: Record<string, number>;
+}> {
+  const [movies, serials, seasons, episodes, channels, users, settings] = await Promise.all([
+    prisma.movie.findMany(),
+    prisma.serial.findMany(),
+    prisma.season.findMany(),
+    prisma.episode.findMany(),
+    prisma.channel.findMany(),
+    prisma.user.findMany(),
+    prisma.setting.findMany(),
+  ]);
 
   const counts = {
-    movies: movies.length, serials: serials.length, seasons: seasons.length,
-    episodes: episodes.length, channels: channels.length, users: users.length,
+    movies: movies.length,
+    serials: serials.length,
+    seasons: seasons.length,
+    episodes: episodes.length,
+    channels: channels.length,
+    users: users.length,
   };
 
   const data = {

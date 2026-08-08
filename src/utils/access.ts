@@ -5,17 +5,52 @@ import { getBool, getSetting, KEYS } from "./settings.js";
 import { isPremiumActive, premiumEnabled, getFreeLimits } from "./premium.js";
 import { sendPremiumPrompt } from "../handlers/premiumUser.js";
 import { todayUz } from "./dateRange.js";
+import { log } from "./logger.js";
 import type { MyContext } from "../types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // Toshkent vaqti bo'yicha kun kaliti — UTC bo'lsa "kunlik" limit soat 05:00 (UZT) da reset bo'lardi
 const today = todayUz;
 
+/** Kontentga ruxsat natijasi — bloklash sababini delivery'ga aytadi. */
+export type AccessReason = "ok" | "sub" | "quota" | "premium";
+export interface AccessResult {
+  ok: boolean;
+  /** Bloklash sababi: sub=obuna, quota=bepul limit, premium=premium talab */
+  reason: AccessReason;
+}
+
 /** Chegara tekshiruvi uchun kerak bo'ladigan minimal foydalanuvchi maydonlari */
 interface QuotaUser {
   premiumUntil: Date | null;
   requestCount: number;
   firstRequestAt: Date | null;
+  contentRequestDay: string | null;
+  contentRequestCount: number;
+}
+
+/** Kunlik bepul kontent limiti (0 = o'chirilgan). */
+async function getDailyLimit(): Promise<number> {
+  return parseInt(await getSetting(KEYS.freeDailyLimit, "0"), 10) || 0;
+}
+
+/**
+ * Kunlik hisobni oshiradi (yoki yangi kun boshlangan bo'lsa 1 ga o'rnatadi).
+ * `user` — countContentRequest oldidan yuklangan User (day aniqlash uchun).
+ */
+async function bumpDailyCount(userId: bigint, user: QuotaUser | null): Promise<void> {
+  const day = today();
+  await prisma.user
+    .update({
+      where: { id: userId },
+      data:
+        user?.contentRequestDay === day
+          ? { contentRequestCount: { increment: 1 } }
+          : { contentRequestDay: day, contentRequestCount: 1 },
+    })
+    .catch((e) => {
+      log("warn", "Kunlik kontent hisobi oshmadi", { userId: userId.toString(), error: String(e) });
+    });
 }
 
 /**
@@ -33,6 +68,17 @@ export async function isFreeQuotaExhausted(user: QuotaUser | null): Promise<bool
     if (Date.now() - user.firstRequestAt.getTime() > freeDays * DAY_MS) return true;
   }
   if (freeReq > 0 && (user?.requestCount ?? 0) >= freeReq) return true;
+
+  // Kunlik qatlam: `contentRequestDay` bugungi kun bo'lsagina hisob kuchga kiradi
+  // (o'tgan kun qoldig'i yangi kunda avtomatik nolga teng).
+  const daily = await getDailyLimit();
+  if (
+    daily > 0 &&
+    user?.contentRequestDay === today() &&
+    (user?.contentRequestCount ?? 0) >= daily
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -50,41 +96,56 @@ export async function countContentRequest(ctx: MyContext): Promise<void> {
   const user = await prisma.user.findUnique({ where: { id: BigInt(uid) } });
   if (isPremiumActive(user?.premiumUntil)) return;
 
-  await prisma.user.update({
-    where: { id: BigInt(uid) },
-    data: {
-      requestCount: { increment: 1 },
-      ...(user?.firstRequestAt ? {} : { firstRequestAt: new Date() }),
-    },
-  }).catch(() => null);
+  const uidB = BigInt(uid);
+  await prisma.user
+    .update({
+      where: { id: uidB },
+      data: {
+        requestCount: { increment: 1 },
+        ...(user?.firstRequestAt ? {} : { firstRequestAt: new Date() }),
+      },
+    })
+    .catch((e) => {
+      log("warn", "Kontent so'rovi hisoblanmadi", { userId: uid.toString(), error: String(e) });
+    });
+
+  // Kunlik qatlam ham oshiriladi — delivery'dan keyingi haqiqiy hisob
+  await bumpDailyCount(uidB, user);
 }
 
 /**
- * Kontentga ruxsatni tekshiradi.
+ * Kontentga ruxsatni tekshiradi — bloklash sababi bilan qaytaradi.
  * - Admin → har doim ruxsat.
  * - Premium foydalanuvchi → ruxsat, majburiy obuna va limit YO'Q.
  * - Aks holda: majburiy obuna → keyin bepul limit (so'rov soni / vaqt).
  * `count=true` bo'lsa so'rov hisoblanadi (haqiqiy kontent yetkazishda).
  * false qaytsa — bloklovchi xabar allaqachon ko'rsatilgan.
+ *
+ * Delivery zanjirlari sababga qarab ishlaydi: reason="sub" bo'lsa pendingCode
+ * saqlanadi (obuna bo'lgach "Tekshirish" yetkazadi), "quota"/"premium" bo'lsa
+ * faqat premium taklifi ko'rsatiladi.
  */
-export async function checkContentAccess(ctx: MyContext, count = true): Promise<boolean> {
+export async function checkContentAccessResult(
+  ctx: MyContext,
+  count = true
+): Promise<AccessResult> {
   const uid = ctx.from!.id;
-  if (isAdmin(uid)) return true;
+  if (isAdmin(uid)) return { ok: true, reason: "ok" };
 
   const user = await prisma.user.findUnique({ where: { id: BigInt(uid) } });
 
   // Premium — obunasiz va limitsiz
-  if (isPremiumActive(user?.premiumUntil)) return true;
+  if (isPremiumActive(user?.premiumUntil)) return { ok: true, reason: "ok" };
 
   // Majburiy obuna
   const forceSub = await getBool(KEYS.forceSubEnabled, true);
   if (forceSub) {
     const ok = await ensureSubscribed(ctx, uid);
-    if (!ok) return false;
+    if (!ok) return { ok: false, reason: "sub" };
   }
 
   // Premium/limit tizimi o'chirilgan — cheklovsiz
-  if (!(await premiumEnabled())) return true;
+  if (!(await premiumEnabled())) return { ok: true, reason: "ok" };
 
   const { requests: freeReq, days: freeDays } = await getFreeLimits();
 
@@ -92,37 +153,90 @@ export async function checkContentAccess(ctx: MyContext, count = true): Promise<
   if (freeDays > 0 && user?.firstRequestAt) {
     if (Date.now() - user.firstRequestAt.getTime() > freeDays * DAY_MS) {
       await sendPremiumPrompt(ctx, "⏳ Bepul foydalanish muddati tugadi.");
-      return false;
+      return { ok: false, reason: "quota" };
     }
   }
 
   // So'rov soni cheklovi
   if (freeReq > 0 && (user?.requestCount ?? 0) >= freeReq) {
     await sendPremiumPrompt(ctx, "🔒 Bepul so'rovlar soni tugadi.");
-    return false;
+    return { ok: false, reason: "quota" };
   }
 
-  // So'rovni hisoblash
+  // Kunlik qatlam: bugungi kunda allaqachon limitga yetganmi?
+  const daily = await getDailyLimit();
+  if (
+    daily > 0 &&
+    user?.contentRequestDay === today() &&
+    (user?.contentRequestCount ?? 0) >= daily
+  ) {
+    await sendPremiumPrompt(ctx, "📅 Bugungi bepul kino limiti tugadi. Ertaga qayta tiklanadi!");
+    return { ok: false, reason: "quota" };
+  }
+
+  // So'rovni hisoblash (umrlik + kunlik)
   if (count) {
-    await prisma.user.update({
-      where: { id: BigInt(uid) },
-      data: {
-        requestCount: { increment: 1 },
-        ...(user?.firstRequestAt ? {} : { firstRequestAt: new Date() }),
-      },
-    }).catch(() => null);
+    const uidB = BigInt(uid);
+    await prisma.user
+      .update({
+        where: { id: uidB },
+        data: {
+          requestCount: { increment: 1 },
+          ...(user?.firstRequestAt ? {} : { firstRequestAt: new Date() }),
+        },
+      })
+      .catch((e) => {
+        log("warn", "Kontent so'rovi hisoblanmadi", { userId: uid.toString(), error: String(e) });
+      });
+    await bumpDailyCount(uidB, user);
   }
 
-  return true;
+  return { ok: true, reason: "ok" };
+}
+
+/** Eski imzo — faqat ok/yo'q (sabab kerak bo'lmagan joylar uchun). */
+export async function checkContentAccess(ctx: MyContext, count = true): Promise<boolean> {
+  return (await checkContentAccessResult(ctx, count)).ok;
 }
 
 /**
- * AI xizmatiga ruxsat (premium funksiya).
+ * AI so'rovi hisobini oshiradi — faqat AI muvaffaqiyatli javob qaytargandan KEYIN
+ * chaqiriladi. Ilgari `checkAiAccess(count=true)` so'rovdan OLDIN hisoblab, xato/
+ * rate-limit qaytgan (javobsiz) so'rovlar ham kunlik kvotani yeb ketardi. Endi
+ * faqat haqiqiy javob = bitta hisob.
+ */
+export async function countAiRequest(ctx: MyContext): Promise<void> {
+  const uid = ctx.from!.id;
+  if (isAdmin(uid)) return;
+  const user = await prisma.user.findUnique({ where: { id: BigInt(uid) } });
+  if (isPremiumActive(user?.premiumUntil)) return;
+  if (!(await premiumEnabled())) return;
+
+  const day = today();
+  await prisma.user
+    .update({
+      where: { id: BigInt(uid) },
+      data:
+        user?.aiRequestDay === day
+          ? { aiRequestCount: { increment: 1 } }
+          : { aiRequestDay: day, aiRequestCount: 1 },
+    })
+    .catch((e) => {
+      log("warn", "AI so'rovi hisoblanmadi", { userId: uid.toString(), error: String(e) });
+    });
+}
+
+/**
+ * AI xizmatiga ruxsat (premium funksiya). FAQAT GATE — hisobni oshirmaydi.
  * - Admin/premium → cheksiz.
  * - Aks holda: premium tizimi + freeAiLimit>0 bo'lsa kunlik AI limiti (kun o'zgarsa reset).
- * `count=true` bo'lsa AI so'rovi hisoblanadi. false qaytsa — premium taklifi ko'rsatilgan.
+ * false qaytsa — premium taklifi ko'rsatilgan.
+ *
+ * Hisoblash `countAiRequest()` bilan MUVVAFFAQIYATLI javobdan keyin qilinadi —
+ * bu funksiyada count yo'q (eski `count=true` xatti-harakati xato so'rovlarni ham
+ * hisoblab, kunlik kvotani yeb qo'ygan edi).
  */
-export async function checkAiAccess(ctx: MyContext, count = true): Promise<boolean> {
+export async function checkAiAccess(ctx: MyContext): Promise<boolean> {
   const uid = ctx.from!.id;
   if (isAdmin(uid)) return true;
 
@@ -138,18 +252,11 @@ export async function checkAiAccess(ctx: MyContext, count = true): Promise<boole
   const usedToday = user?.aiRequestDay === day ? (user?.aiRequestCount ?? 0) : 0;
 
   if (usedToday >= limit) {
-    await sendPremiumPrompt(ctx, `🤖 Bugungi bepul AI so'rovlaringiz (${limit} ta) tugadi. Premium bilan cheksiz!`);
+    await sendPremiumPrompt(
+      ctx,
+      `🤖 Bugungi bepul AI so'rovlaringiz (${limit} ta) tugadi. Premium bilan cheksiz!`
+    );
     return false;
-  }
-
-  if (count) {
-    await prisma.user.update({
-      where: { id: BigInt(uid) },
-      data:
-        user?.aiRequestDay === day
-          ? { aiRequestCount: { increment: 1 } }
-          : { aiRequestDay: day, aiRequestCount: 1 },
-    }).catch(() => null);
   }
 
   return true;

@@ -9,11 +9,13 @@ function today(): string {
 /** askAI muvaffaqiyatli chaqiruvidan keyin sarfni kunlik jamlaydi */
 async function record(provider: ProviderId, model: string, tokens: number) {
   const day = today();
-  await prisma.aiUsage.upsert({
-    where: { provider_model_day: { provider, model, day } },
-    create: { provider, model, day, requests: 1, tokens },
-    update: { requests: { increment: 1 }, tokens: { increment: tokens } },
-  }).catch(() => null);
+  await prisma.aiUsage
+    .upsert({
+      where: { provider_model_day: { provider, model, day } },
+      create: { provider, model, day, requests: 1, tokens },
+      update: { requests: { increment: 1 }, tokens: { increment: tokens } },
+    })
+    .catch(() => null);
 }
 
 /** ai.ts usage sink'ini DB'ga ulaydi (index.ts startupda chaqiradi) */

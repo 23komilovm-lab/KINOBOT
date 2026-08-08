@@ -1,13 +1,14 @@
 import { config } from "../config.js";
 import { e } from "../utils/emoji.js";
+import { log } from "../utils/logger.js";
 import type { MyContext } from "../types.js";
 import type { Movie } from "@prisma/client";
 
 // Premium emoji IDlar (shaxsiy chatda ko'rinadi, kanalda fallback ishlaydi)
 const EM = {
-  name:  "5258077307985207053", // 📹
+  name: "5258077307985207053", // 📹
   genre: "5258318251355545562", // 🎭
-  time:  "5258419835922030550", // 🕔
+  time: "5258419835922030550", // 🕔
 };
 
 function tg(id: string, fallback: string): string {
@@ -30,30 +31,30 @@ export function formatDuration(secs: number): string {
  * "drama" dan oldin, aks holda "drama" birinchi bo'lib ushlab qoladi).
  */
 const GENRE_EMOJI: [string, string][] = [
-  ["melodrama",   "❤️"],
-  ["romantik",    "❤️"],
-  ["jangari",     "💥"],
-  ["triller",     "🌀"],
+  ["melodrama", "❤️"],
+  ["romantik", "❤️"],
+  ["jangari", "💥"],
+  ["triller", "🌀"],
   ["qo'rqinchli", "👻"],
-  ["qorqinchli",  "👻"],
-  ["dahshat",     "👻"],
-  ["ujas",        "👻"],
-  ["komediya",    "😂"],
-  ["fantastika",  "🚀"],
-  ["fantastik",   "🚀"],
-  ["fentezi",     "🐉"],
-  ["fantaziya",   "🐉"],
-  ["detektiv",    "🕵️"],
-  ["kriminal",    "🕵️"],
-  ["multfilm",    "🎨"],
-  ["anime",       "🎨"],
-  ["tarixiy",     "🏛"],
-  ["urush",       "⚔️"],
-  ["harbiy",      "⚔️"],
-  ["sarguzasht",  "🧭"],
-  ["sport",       "🏆"],
-  ["hujjatli",    "📽"],
-  ["drama",       "🎭"],
+  ["qorqinchli", "👻"],
+  ["dahshat", "👻"],
+  ["ujas", "👻"],
+  ["komediya", "😂"],
+  ["fantastika", "🚀"],
+  ["fantastik", "🚀"],
+  ["fentezi", "🐉"],
+  ["fantaziya", "🐉"],
+  ["detektiv", "🕵️"],
+  ["kriminal", "🕵️"],
+  ["multfilm", "🎨"],
+  ["anime", "🎨"],
+  ["tarixiy", "🏛"],
+  ["urush", "⚔️"],
+  ["harbiy", "⚔️"],
+  ["sarguzasht", "🧭"],
+  ["sport", "🏆"],
+  ["hujjatli", "📽"],
+  ["drama", "🎭"],
 ];
 
 /**
@@ -62,7 +63,10 @@ const GENRE_EMOJI: [string, string][] = [
  */
 export function genreEmoji(genre: string | null): string {
   if (!genre) return "🎭";
-  const parts = genre.toLowerCase().split(/[,/|]/).map((s) => s.trim());
+  const parts = genre
+    .toLowerCase()
+    .split(/[,/|]/)
+    .map((s) => s.trim());
   for (const part of parts) {
     for (const [key, emoji] of GENRE_EMOJI) {
       if (part.includes(key)) return emoji;
@@ -121,8 +125,30 @@ export function describeError(err: unknown): string {
 }
 
 /**
- * Qisqa videoni kino kanalga tashlaydi.
- * { msgId } yoki { error } qaytaradi.
+ * Xatoni klassifikatsiya qiladi: qayta urinish mantiqlimi yoki darhol taslim bo'lishmi.
+ * - 429 (too many requests) va 5xx — Telegram serverida vaqtinchalik → retry.
+ * - 400/403 kabi doimiy xatolar (yaroqsiz file_id, kanal huquqi yo'q) → fatal,
+ *   takrorlash faqat vaqtni behuda sarflaydi.
+ * - Network xatolari (fetch/ECONNRESET/timeout) → retry.
+ */
+export function classifyError(err: unknown): "retry" | "fatal" {
+  if (err && typeof err === "object") {
+    const anyErr = err as { error_code?: unknown; message?: unknown };
+    if (typeof anyErr.error_code === "number") {
+      if (anyErr.error_code === 429 || anyErr.error_code >= 500) return "retry";
+      return "fatal";
+    }
+    const msg = typeof anyErr.message === "string" ? anyErr.message : String(anyErr);
+    if (/fetch|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket|network|timeout|EPIPE/i.test(msg))
+      return "retry";
+  }
+  return "fatal";
+}
+
+/**
+ * Qisqa videoni kino kanalga tashlaydi — 3 urinish, 1s/3s backoff bilan.
+ * Vaqtinchalik (network/429/5xx) xatolarda qayta urinadi; doimiy xatoda darhol
+ * taslim bo'ladi. { msgId } yoki { error } qaytaradi.
  */
 export async function postToMovieChannel(
   ctx: MyContext,
@@ -132,19 +158,34 @@ export async function postToMovieChannel(
   if (!config.movieChannelId) {
     return { msgId: null, error: "MOVIE_CHANNEL_ID sozlanmagan (.env)" };
   }
-  try {
-    const btn = movieWatchButton(ctx.me.username, movie.code);
-    const sent = await ctx.api.sendVideo(config.movieChannelId, shortFileId, {
-      caption: movieChannelCaption(movie, true), // kanal — janrga mos ikonka
-      parse_mode: "HTML",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      reply_markup: { inline_keyboard: [[btn]] } as any,
-    });
-    return { msgId: sent.message_id, error: null };
-  } catch (err) {
-    // Serverga ham yoziladi — ilgari faqat adminning chatiga ketardi, keyingi
-    // safar "nomaʼlum xato" chiqsa ham Railway logidan aniq sababni ko'rish mumkin.
-    console.error(`🛑 Qisqa video kino kanalga tashlanmadi (kino #${movie.code}):`, err);
-    return { msgId: null, error: describeError(err) };
+
+  const ATTEMPTS = 3;
+  const BACKOFF_MS = [0, 1000, 3000];
+  let lastError: string | null = null;
+
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    try {
+      const btn = movieWatchButton(ctx.me.username, movie.code);
+      const sent = await ctx.api.sendVideo(config.movieChannelId, shortFileId, {
+        caption: movieChannelCaption(movie, true), // kanal — janrga mos ikonka
+        parse_mode: "HTML",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        reply_markup: { inline_keyboard: [[btn]] } as any,
+      });
+      return { msgId: sent.message_id, error: null };
+    } catch (err) {
+      lastError = describeError(err);
+      // Railway logida urinish va aniq sabab ko'rinishi kerak
+      log("warn", "Qisqa video kino kanalga tashlanmadi", {
+        movieCode: movie.code,
+        attempt: attempt + 1,
+        attempts: ATTEMPTS,
+        error: describeError(err),
+      });
+      if (classifyError(err) === "fatal") break; // qayta urinish foydasiz
+      if (attempt < ATTEMPTS - 1) await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt + 1]));
+    }
   }
+
+  return { msgId: null, error: lastError ?? "noma'lum xato" };
 }

@@ -4,15 +4,26 @@ import { config } from "../config.js";
 import { e } from "../utils/emoji.js";
 import { contactAdminBtn, contactAdminKb, ibtn, kb, BE } from "../utils/keyboard.js";
 import { getSetting, KEYS } from "../utils/settings.js";
-import { activeTariffs, grantPremium, isPremiumActive, premiumEnabled, seedDefaultTariffs } from "../utils/premium.js";
+import {
+  activeTariffs,
+  grantPremium,
+  isPremiumActive,
+  premiumEnabled,
+  seedDefaultTariffs,
+} from "../utils/premium.js";
 import { getUnsubscribedChannels, editSubscriptionPrompt } from "../utils/subscription.js";
 import { buildPaymentNotify, pendingMarkup, serializeRefs } from "../utils/paymentNotify.js";
+import { log, notifyOwner, formatError } from "../utils/logger.js";
 import type { MyContext } from "../types.js";
 
 export const premiumHandler = new Composer<MyContext>();
 
 /** Premium taklifi xabari (limit tugaganda, /premium yoki obuna so'rovi ostidagi tugma orqali) */
-export async function sendPremiumPrompt(ctx: MyContext, reason?: string, edit = false): Promise<void> {
+export async function sendPremiumPrompt(
+  ctx: MyContext,
+  reason?: string,
+  edit = false
+): Promise<void> {
   let tariffs = await activeTariffs();
   // Premium yoqilgan-u tarif yo'q bo'lsa — standart tariflarni avtomatik qo'shamiz
   if (tariffs.length === 0 && (await premiumEnabled())) {
@@ -75,7 +86,10 @@ export async function sendPremiumPrompt(ctx: MyContext, reason?: string, edit = 
 
   const text = lines.join("\n");
   const markup = kb(...rows);
-  if (edit) await ctx.editMessageText(text, { reply_markup: markup }).catch(() => ctx.reply(text, { reply_markup: markup }));
+  if (edit)
+    await ctx
+      .editMessageText(text, { reply_markup: markup })
+      .catch(() => ctx.reply(text, { reply_markup: markup }));
   else await ctx.reply(text, { reply_markup: markup });
 }
 
@@ -87,10 +101,15 @@ premiumHandler.command("premium", async (ctx) => {
     const daysLeft = Math.max(1, Math.ceil((until.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
     await ctx.reply(
       `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Sizda Premium faol!</b>\n\n` +
-      `Amal qilish muddati: <b>${until.toLocaleDateString("ru-RU")}</b> gacha — <b>${daysLeft} kun</b> qoldi.\n\n` +
-      `<i>Muddat tugagach majburiy obuna va limitlar qaytadan ishlaydi. ` +
-      `Tugashiga 3 kun qolganda eslatma yuboramiz.</i>`,
-      { reply_markup: kb([ibtn("💎 Obunani uzaytirish", "prem:show", "success")], [contactAdminBtn()]) }
+        `Amal qilish muddati: <b>${until.toLocaleDateString("ru-RU")}</b> gacha — <b>${daysLeft} kun</b> qoldi.\n\n` +
+        `<i>Muddat tugagach majburiy obuna va limitlar qaytadan ishlaydi. ` +
+        `Tugashiga 3 kun qolganda eslatma yuboramiz.</i>`,
+      {
+        reply_markup: kb(
+          [ibtn("💎 Obunani uzaytirish", "prem:show", "success")],
+          [contactAdminBtn()]
+        ),
+      }
     );
     return;
   }
@@ -107,7 +126,7 @@ premiumHandler.callbackQuery("prem:show", async (ctx) => {
 premiumHandler.callbackQuery("prem:back", async (ctx) => {
   await ctx.answerCallbackQuery();
   const notJoined = await getUnsubscribedChannels(ctx, ctx.from.id);
-  const blocking  = notJoined.filter((c) => c.type !== "INSTAGRAM");
+  const blocking = notJoined.filter((c) => c.type !== "INSTAGRAM");
   if (blocking.length > 0) {
     await editSubscriptionPrompt(ctx, notJoined);
   } else {
@@ -129,15 +148,19 @@ premiumHandler.callbackQuery(/^prem:buy:(\d+)$/, async (ctx) => {
     // TON orqali vaqtincha yashirilgan (so'ralganda qayta yoqiladi) — pm:ton handler o'zi qoladi.
   ];
   if (tariff.starsPrice) {
-    rows.push([ibtn(`⭐ Stars orqali (${tariff.starsPrice} ⭐)`, `pm:stars:${tariff.id}`, "success")]);
+    rows.push([
+      ibtn(`⭐ Stars orqali (${tariff.starsPrice} ⭐)`, `pm:stars:${tariff.id}`, "success"),
+    ]);
   }
   rows.push([ibtn("⬅️ Orqaga", "prem:show", undefined, BE.backMenu)]);
 
-  await ctx.editMessageText(
-    `💳 <b>${e.escapeHtml(tariff.label)}</b> — ${priceWithOld(tariff)} (${tariff.days} kun)\n\n` +
-    `To'lov usulini tanlang:`,
-    { reply_markup: kb(...rows) }
-  ).catch(() => ctx.reply(`To'lov usulini tanlang:`, { reply_markup: kb(...rows) }));
+  await ctx
+    .editMessageText(
+      `💳 <b>${e.escapeHtml(tariff.label)}</b> — ${priceWithOld(tariff)} (${tariff.days} kun)\n\n` +
+        `To'lov usulini tanlang:`,
+      { reply_markup: kb(...rows) }
+    )
+    .catch(() => ctx.reply(`To'lov usulini tanlang:`, { reply_markup: kb(...rows) }));
 });
 
 /** "eski narx (chizilgan) yangi narx -N%" ko'rinishidagi matn */
@@ -165,7 +188,11 @@ premiumHandler.callbackQuery(/^pm:(karta|ton):(\d+)$/, async (ctx) => {
 
   const infoKey = method === "karta" ? KEYS.paymentInfo : KEYS.paymentInfoTon;
   const payInfo = await getSetting(infoKey, "");
-  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), premBuyTariff: tariff.id, premBuyMethod: method };
+  ctx.session.scratch = {
+    ...(ctx.session.scratch ?? {}),
+    premBuyTariff: tariff.id,
+    premBuyMethod: method,
+  };
 
   const text =
     `${METHOD_LABEL[method]}\n\n` +
@@ -178,7 +205,9 @@ premiumHandler.callbackQuery(/^pm:(karta|ton):(\d+)$/, async (ctx) => {
     `To'lovni amalga oshirgach, <b>chek/screenshot</b> rasmini shu yerga yuboring. ` +
     `Admin tekshirib premiumni yoqadi.`;
   const markup = kb([ibtn("❌ Bekor qilish", "prem:cancel", "danger")]);
-  await ctx.editMessageText(text, { reply_markup: markup }).catch(() => ctx.reply(text, { reply_markup: markup }));
+  await ctx
+    .editMessageText(text, { reply_markup: markup })
+    .catch(() => ctx.reply(text, { reply_markup: markup }));
 });
 
 premiumHandler.callbackQuery("prem:cancel", async (ctx) => {
@@ -198,24 +227,32 @@ premiumHandler.callbackQuery(/^pm:stars:(\d+)$/, async (ctx) => {
     await ctx.reply("❌ Stars orqali to'lov hozircha mavjud emas.");
     return;
   }
-  await ctx.api.sendInvoice(
-    ctx.chat!.id,
-    `💎 Premium — ${tariff.label}`,
-    `${tariff.days} kunlik Premium obuna (Kino vaqti)`,
-    `stars:${tariff.id}`,
-    "XTR",
-    [{ label: tariff.label, amount: tariff.starsPrice }],
-  ).catch(async () => {
-    await ctx.reply("❌ To'lov oynasini ochib bo'lmadi. Birozdan keyin urinib ko'ring.");
-  });
+  await ctx.api
+    .sendInvoice(
+      ctx.chat!.id,
+      `💎 Premium — ${tariff.label}`,
+      `${tariff.days} kunlik Premium obuna (Kino vaqti)`,
+      `stars:${tariff.id}`,
+      "XTR",
+      [{ label: tariff.label, amount: tariff.starsPrice }]
+    )
+    .catch(async () => {
+      await ctx.reply("❌ To'lov oynasini ochib bo'lmadi. Birozdan keyin urinib ko'ring.");
+    });
 });
 
 premiumHandler.on("pre_checkout_query", async (ctx) => {
   const payload = ctx.preCheckoutQuery.invoice_payload;
   const m = payload.match(/^stars:(\d+)$/);
-  if (!m) { await ctx.answerPreCheckoutQuery(false, "Noto'g'ri so'rov."); return; }
+  if (!m) {
+    await ctx.answerPreCheckoutQuery(false, "Noto'g'ri so'rov.");
+    return;
+  }
   const tariff = await prisma.tariff.findUnique({ where: { id: Number(m[1]) } });
-  if (!tariff || !tariff.isActive) { await ctx.answerPreCheckoutQuery(false, "Tarif topilmadi."); return; }
+  if (!tariff || !tariff.isActive) {
+    await ctx.answerPreCheckoutQuery(false, "Tarif topilmadi.");
+    return;
+  }
   await ctx.answerPreCheckoutQuery(true);
 });
 
@@ -227,7 +264,48 @@ premiumHandler.on("message:successful_payment", async (ctx) => {
   if (!tariff) return;
 
   const uid = BigInt(ctx.from!.id);
-  const until = await grantPremium(uid, tariff.days);
+
+  // Stars to'lovi Telegram tomonidan allaqachon qabul qilingan. Grant DB xatosida
+  // ishlamasa ham to'lov yozuvi pending saqlanadi va owner xabardor qilinadi —
+  // aks holda user pul to'lab, premium olmay, izsiz yo'qolardi.
+  let until: Date;
+  try {
+    until = await grantPremium(uid, tariff.days);
+  } catch (err) {
+    log("error", "Stars to'lov granti muvaffaqiyatsiz", {
+      userId: uid.toString(),
+      tariffId: tariff.id,
+      error: formatError(err),
+    });
+    await prisma.payment
+      .create({
+        data: {
+          userId: uid,
+          tariffId: tariff.id,
+          tariffLabel: tariff.label,
+          days: tariff.days,
+          amount: tariff.price,
+          method: "stars",
+          status: "pending", // owner qo'lda ko'rib, grant berishi mumkin
+        },
+      })
+      .catch((e) => log("error", "Stars pending yozuv saqlanmadi", { error: String(e) }));
+    await notifyOwner(
+      `⚠️ Stars to'lovi qabul qilindi, lekin premium YOQILMADI!\n` +
+        `Foydalanuvchi ID: ${uid}\n` +
+        `Tarif: ${tariff.label} (${tariff.days} kun)\n` +
+        `Xato: ${formatError(err)}\n\n` +
+        `To'lovni qo'lda tasdiqlab, premium berish kerak.`,
+      "stars-grant-fail"
+    );
+    await ctx.reply(
+      `❌ To'lov qabul qilindi, lekin premium yoqishda texnik xato yuz berdi.\n` +
+        `Iltimos, admin bilan bog'laning — to'lov tasdiqlangan, premium beriladi.`,
+      { reply_markup: contactAdminKb() }
+    );
+    return;
+  }
+
   await prisma.payment.create({
     data: {
       userId: uid,
@@ -243,9 +321,9 @@ premiumHandler.on("message:successful_payment", async (ctx) => {
 
   await ctx.reply(
     `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium yoqildi!</b>\n\n` +
-    `To'lov Stars orqali muvaffaqiyatli qabul qilindi. Premium <b>${until.toLocaleDateString("ru-RU")}</b> gacha amal qiladi.\n` +
-    `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉\n\n` +
-    `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
+      `To'lov Stars orqali muvaffaqiyatli qabul qilindi. Premium <b>${until.toLocaleDateString("ru-RU")}</b> gacha amal qiladi.\n` +
+      `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉\n\n` +
+      `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
     { reply_markup: contactAdminKb() }
   );
 });
@@ -258,12 +336,18 @@ premiumHandler.on(["message:photo", "message:document"], async (ctx, next) => {
 
   const tariff = await prisma.tariff.findUnique({ where: { id: tariffId } });
   if (!tariff) {
-    if (ctx.session.scratch) { delete ctx.session.scratch.premBuyTariff; delete ctx.session.scratch.premBuyMethod; }
+    if (ctx.session.scratch) {
+      delete ctx.session.scratch.premBuyTariff;
+      delete ctx.session.scratch.premBuyMethod;
+    }
     return;
   }
 
   const proofFileId = ctx.message.photo?.at(-1)?.file_id ?? ctx.message.document?.file_id ?? null;
-  if (ctx.session.scratch) { delete ctx.session.scratch.premBuyTariff; delete ctx.session.scratch.premBuyMethod; }
+  if (ctx.session.scratch) {
+    delete ctx.session.scratch.premBuyTariff;
+    delete ctx.session.scratch.premBuyMethod;
+  }
 
   const payment = await prisma.payment.create({
     data: {
@@ -280,8 +364,8 @@ premiumHandler.on(["message:photo", "message:document"], async (ctx, next) => {
 
   await ctx.reply(
     `✅ <b>Chek qabul qilindi!</b>\n\n` +
-    `To'lovingiz admin tomonidan tekshirilmoqda. Tasdiqlangach premium avtomatik yoqiladi. ` +
-    `Odatda bu bir necha daqiqa/soat ichida bo'ladi.`
+      `To'lovingiz admin tomonidan tekshirilmoqda. Tasdiqlangach premium avtomatik yoqiladi. ` +
+      `Odatda bu bir necha daqiqa/soat ichida bo'ladi.`
   );
 
   // Adminlarga (owner) + audit kanaliga xabar, Tasdiqlash/Rad etish tugmalari bilan.
@@ -304,9 +388,13 @@ premiumHandler.on(["message:photo", "message:document"], async (ctx, next) => {
     if (sent) refs.push({ c: chatId, m: sent.message_id });
 
     if (proofFileId && ctx.message.photo) {
-      await ctx.api.sendPhoto(chatId, proofFileId, { caption: `Chek — to'lov #${payment.id}` }).catch(() => null);
+      await ctx.api
+        .sendPhoto(chatId, proofFileId, { caption: `Chek — to'lov #${payment.id}` })
+        .catch(() => null);
     } else if (proofFileId && ctx.message.document) {
-      await ctx.api.sendDocument(chatId, proofFileId, { caption: `Chek — to'lov #${payment.id}` }).catch(() => null);
+      await ctx.api
+        .sendDocument(chatId, proofFileId, { caption: `Chek — to'lov #${payment.id}` })
+        .catch(() => null);
     }
   }
 

@@ -7,7 +7,7 @@ import type { Payment } from "@prisma/client";
 
 export const METHOD_LABEL: Record<string, string> = {
   karta: "💳 Karta orqali",
-  ton:   "💎 TON orqali o'tkazma",
+  ton: "💎 TON orqali o'tkazma",
   stars: "⭐ Telegram Stars",
 };
 
@@ -19,12 +19,10 @@ export const METHOD_LABEL: Record<string, string> = {
 export function userLink(
   id: bigint | number,
   firstName?: string | null,
-  username?: string | null,
+  username?: string | null
 ): string {
   const name = e.escapeHtml(firstName?.trim() || "Foydalanuvchi");
-  const url = username
-    ? `https://t.me/${username.replace(/^@/, "")}`
-    : `tg://user?id=${id}`;
+  const url = username ? `https://t.me/${username.replace(/^@/, "")}` : `tg://user?id=${id}`;
   return `<a href="${url}">${name}</a>`;
 }
 
@@ -38,24 +36,29 @@ const STATUS_LINE: Record<string, string> = {
  * tasdiqlangandan keyin yangilashda ham AYNAN shu matn ishlatiladi.
  */
 export async function buildPaymentNotify(p: Payment): Promise<string> {
-  const u = await prisma.user.findUnique({
-    where: { id: p.userId },
-    select: { firstName: true, username: true, createdAt: true, region: true },
-  }).catch(() => null);
+  const u = await prisma.user
+    .findUnique({
+      where: { id: p.userId },
+      select: { firstName: true, username: true, createdAt: true, region: true },
+    })
+    .catch(() => null);
 
   const uname = u?.username ? `@${u.username}` : "—";
   const method = METHOD_LABEL[p.method] ?? p.method;
 
-  const head = p.status === "pending"
-    ? `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Yangi premium to'lov!</b>`
-    : `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium to'lov</b>`;
+  const head =
+    p.status === "pending"
+      ? `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Yangi premium to'lov!</b>`
+      : `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium to'lov</b>`;
 
   let reviewer = "";
   if (p.status !== "pending" && p.reviewedById) {
-    const r = await prisma.user.findUnique({
-      where: { id: p.reviewedById },
-      select: { firstName: true, username: true },
-    }).catch(() => null);
+    const r = await prisma.user
+      .findUnique({
+        where: { id: p.reviewedById },
+        select: { firstName: true, username: true },
+      })
+      .catch(() => null);
     reviewer = `\nKim ko'rib chiqdi: ${userLink(p.reviewedById, r?.firstName, r?.username)}`;
   }
 
@@ -85,7 +88,10 @@ export function pendingMarkup(paymentId: number) {
   ]);
 }
 
-interface NotifyRef { c: number; m: number }
+interface NotifyRef {
+  c: number;
+  m: number;
+}
 
 function parseRefs(json: string | null): NotifyRef[] {
   if (!json) return [];

@@ -3,9 +3,25 @@ import type { Conversation } from "@grammyjs/conversations";
 import { prisma } from "../../prisma.js";
 import { config, adminCan } from "../../config.js";
 import { ce, e } from "../../utils/emoji.js";
-import { ADMIN_MENU_BUTTONS, ibtn, BE, kb, cancelKeyboard, adminMenuKeyboard } from "../../utils/keyboard.js";
+import {
+  ADMIN_MENU_BUTTONS,
+  ibtn,
+  BE,
+  kb,
+  cancelKeyboard,
+  adminMenuKeyboard,
+} from "../../utils/keyboard.js";
 import { isValidUrl, resolveButtonStyle } from "../../utils/contentButton.js";
-import { getSetting, setSetting, getGlobalButton, getBool, setBool, KEYS } from "../../utils/settings.js";
+import {
+  getSetting,
+  setSetting,
+  getGlobalButton,
+  getBool,
+  setBool,
+  KEYS,
+} from "../../utils/settings.js";
+import { normalizeTitle } from "../../utils/translit.js";
+import { describeError } from "../../services/movieChannel.js";
 import type { MyContext } from "../../types.js";
 
 export const serialsHandler = new Composer<MyContext>();
@@ -19,8 +35,14 @@ const stop = (ctx: MyContext) =>
 
 function serialMenu() {
   return kb(
-    [ibtn("Serial qo'shish", "sr:add", "success", BE.chAdd), ibtn("Qism qo'shish", "sr:addep", "success", BE.movie)],
-    [ibtn("Ro'yxat", "sr:list", "primary", BE.chList), ibtn("O'chirish", "sr:dellist", "danger", BE.chDelete)],
+    [
+      ibtn("Serial qo'shish", "sr:add", "success", BE.chAdd),
+      ibtn("Qism qo'shish", "sr:addep", "success", BE.movie),
+    ],
+    [
+      ibtn("Ro'yxat", "sr:list", "primary", BE.chList),
+      ibtn("O'chirish", "sr:dellist", "danger", BE.chDelete),
+    ],
     [ibtn("Knopka boshqaruvi", "sr:btnlist:0")],
     [ibtn("Menyuga qaytish", "sr:close", undefined, BE.backMenu)]
   );
@@ -66,9 +88,7 @@ export async function addSerial(conversation: Conversation<MyContext>, ctx: MyCo
       continue;
     }
     code = Number(t);
-    const exists = await conversation.external(() =>
-      prisma.serial.findUnique({ where: { code } })
-    );
+    const exists = await conversation.external(() => prisma.serial.findUnique({ where: { code } }));
     if (exists) {
       await c.reply("⚠️ Bu kod band.");
       continue;
@@ -88,7 +108,7 @@ export async function addSerial(conversation: Conversation<MyContext>, ctx: MyCo
 
   const serial = await conversation.external(() =>
     prisma.serial.create({
-      data: { code, title, caption: cap === "-" ? null : cap },
+      data: { code, title, caption: cap === "-" ? null : cap, titleNorm: normalizeTitle(title) },
     })
   );
 
@@ -115,9 +135,12 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   );
 
   if (serials.length === 0) {
-    return ctx.reply("📭 Hozircha serial yo'q. Avval <b>Serial qo'shish</b> orqali serial qo'shing.", {
-      reply_markup: adminMenuKeyboard(ctx.from?.id),
-    });
+    return ctx.reply(
+      "📭 Hozircha serial yo'q. Avval <b>Serial qo'shish</b> orqali serial qo'shing.",
+      {
+        reply_markup: adminMenuKeyboard(ctx.from?.id),
+      }
+    );
   }
 
   const serialRows = serials.map((s) => [
@@ -147,15 +170,22 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   );
 
   const seasonRows = seasons.map((s) => [
-    ibtn(`${s.number}-sezon (${s._count.episodes} qism)`, `ep:se:${s.number}`, "primary", BE.folder),
+    ibtn(
+      `${s.number}-sezon (${s._count.episodes} qism)`,
+      `ep:se:${s.number}`,
+      "primary",
+      BE.folder
+    ),
   ]);
   const nextSeason = seasons.length ? Math.max(...seasons.map((s) => s.number)) + 1 : 1;
-  seasonRows.push([ibtn(`➕ Yangi sezon (${nextSeason})`, `ep:se:${nextSeason}`, "success", BE.chAdd)]);
+  seasonRows.push([
+    ibtn(`➕ Yangi sezon (${nextSeason})`, `ep:se:${nextSeason}`, "success", BE.chAdd),
+  ]);
   seasonRows.push([ibtn("❌ Bekor qilish", "ep:cancel", "danger")]);
 
   await ctx.reply(
     `<b>${e.escapeHtml(serialTitle)}</b>\n\n2️⃣ Qaysi sezon?` +
-    (seasons.length === 0 ? `\n\n<i>Hozircha sezon yo'q — yangi sezon qo'shiladi.</i>` : ""),
+      (seasons.length === 0 ? `\n\n<i>Hozircha sezon yo'q — yangi sezon qo'shiladi.</i>` : ""),
     { reply_markup: kb(...seasonRows) }
   );
 
@@ -177,8 +207,8 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
 
   await ctx.reply(
     `<b>${e.escapeHtml(serialTitle)}</b> — ${seasonNum}-sezon\n\n` +
-    `3️⃣ <b>Qism</b> raqami: keyingisi <b>${suggested}</b>.\n\n` +
-    `Shu bo'lsa <code>+</code> deb yuboring, yoki boshqa raqam yozing.`,
+      `3️⃣ <b>Qism</b> raqami: keyingisi <b>${suggested}</b>.\n\n` +
+      `Shu bo'lsa <code>+</code> deb yuboring, yoki boshqa raqam yozing.`,
     { reply_markup: cancelKeyboard() }
   );
 
@@ -187,7 +217,10 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
     const c = await conversation.wait();
     if (isCancel(c.message?.text)) return stop(c);
     const t = c.message?.text?.trim() ?? "";
-    if (t === "+") { epNum = suggested; break; }
+    if (t === "+") {
+      epNum = suggested;
+      break;
+    }
     if (!/^\d+$/.test(t)) {
       await c.reply(`❌ Faqat raqam, yoki <code>+</code> (${suggested}-qism uchun).`);
       continue;
@@ -208,7 +241,7 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   }
   const fileId = video.file_id;
 
-  // baza kanalga tashlash
+  // baza kanalga tashlash — xato yutilmaydi, adminga ko'rsatiladi (episod baribir saqlanadi)
   let baseMsgId: number | null = null;
   if (config.baseChannelId) {
     try {
@@ -216,8 +249,11 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
         caption: `#serial ${e.escapeHtml(serialTitle)} · S${seasonNum}E${epNum}`,
       });
       baseMsgId = sent.message_id;
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error(`🛑 Serial episod baza kanalga tashlanmadi (S${seasonNum}E${epNum}):`, err);
+      await vidCtx.reply(
+        `⚠️ Baza kanalga tashlab bo'lmadi (qism baribir saqlanadi): ${e.escapeHtml(describeError(err))}`
+      );
     }
   }
 
@@ -243,7 +279,7 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   await ctx.reply("Yana qism qo'shasizmi?", {
     reply_markup: kb(
       [ibtn("➕ Yana qism qo'shish", "sr:addep", "success", BE.chAdd)],
-      [ibtn("🎞 Serial bo'limi", "sr:back", "primary", BE.backMenu)],
+      [ibtn("🎞 Serial bo'limi", "sr:back", "primary", BE.backMenu)]
     ),
   });
 }
@@ -253,7 +289,10 @@ serialsHandler.callbackQuery("sr:list", async (ctx) => {
   await ctx.answerCallbackQuery();
   const serials = await prisma.serial.findMany({
     orderBy: { code: "asc" },
-    include: { _count: { select: { seasons: true } }, seasons: { include: { _count: { select: { episodes: true } } } } },
+    include: {
+      _count: { select: { seasons: true } },
+      seasons: { include: { _count: { select: { episodes: true } } } },
+    },
   });
   if (serials.length === 0) {
     await ctx.editMessageText("📭 Serial yo'q.", { reply_markup: serialMenu() }).catch(() => {});
@@ -261,13 +300,21 @@ serialsHandler.callbackQuery("sr:list", async (ctx) => {
   }
   const rows = serials.map((s) => {
     const eps = s.seasons.reduce((a, x) => a + x._count.episodes, 0);
-    return [ibtn(`${s.code} · ${s.title} · ${s._count.seasons} sezon, ${eps} qism`, `sr:view:${s.id}`, "primary", BE.serial)];
+    return [
+      ibtn(
+        `${s.code} · ${s.title} · ${s._count.seasons} sezon, ${eps} qism`,
+        `sr:view:${s.id}`,
+        "primary",
+        BE.serial
+      ),
+    ];
   });
   rows.push([ibtn("Orqaga", "sr:back", undefined, BE.home)]);
-  await ctx.editMessageText(
-    `${ce("list")} <b>Seriallar:</b>\n\nSerialni tanlang:`,
-    { reply_markup: kb(...rows) }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(`${ce("list")} <b>Seriallar:</b>\n\nSerialni tanlang:`, {
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 });
 
 serialsHandler.callbackQuery(/^sr:view:(\d+)$/, async (ctx) => {
@@ -278,18 +325,20 @@ serialsHandler.callbackQuery(/^sr:view:(\d+)$/, async (ctx) => {
   });
   if (!serial) return;
   const eps = serial.seasons.reduce((a, x) => a + x._count.episodes, 0);
-  await ctx.editMessageText(
-    `<tg-emoji emoji-id="${BE.serial}">📺</tg-emoji> <b>${e.escapeHtml(serial.title)}</b>\n` +
-      `Kod: <code>${serial.code}</code>\n` +
-      `Sezonlar: <b>${serial.seasons.length}</b>\n` +
-      `Qismlar: <b>${eps}</b>`,
-    {
-      reply_markup: kb(
-        [ibtn("Knopkani tahrirlash", "sr:btnlist:0", "primary", BE.editName)],
-        [ibtn("Orqaga", "sr:list", undefined, BE.home)]
-      ),
-    }
-  ).catch(() => {});
+  await ctx
+    .editMessageText(
+      `<tg-emoji emoji-id="${BE.serial}">📺</tg-emoji> <b>${e.escapeHtml(serial.title)}</b>\n` +
+        `Kod: <code>${serial.code}</code>\n` +
+        `Sezonlar: <b>${serial.seasons.length}</b>\n` +
+        `Qismlar: <b>${eps}</b>`,
+      {
+        reply_markup: kb(
+          [ibtn("Knopkani tahrirlash", "sr:btnlist:0", "primary", BE.editName)],
+          [ibtn("Orqaga", "sr:list", undefined, BE.home)]
+        ),
+      }
+    )
+    .catch(() => {});
 });
 
 serialsHandler.callbackQuery("sr:back", async (ctx) => {
@@ -310,9 +359,9 @@ serialsHandler.callbackQuery(/^sr:btnlist:\d+$/, async (ctx) => {
 });
 
 async function renderGlobalSerialButtonEditor(ctx: MyContext, edit = true) {
-  const btn     = await getGlobalButton("serial");
+  const btn = await getGlobalButton("serial");
   const enabled = await getBool(KEYS.serialBtnEnabled, true);
-  const status  = btn.buttonUrl
+  const status = btn.buttonUrl
     ? `Nom: <b>${e.escapeHtml(btn.buttonText ?? "Ko'rish")}</b>\nHavola: ${e.escapeHtml(btn.buttonUrl)}\nRang: <b>${btn.buttonStyle}</b>`
     : "Knopka hali sozlanmagan.";
 
@@ -330,14 +379,14 @@ async function renderGlobalSerialButtonEditor(ctx: MyContext, edit = true) {
       ),
     ],
     [
-      ibtn("Nomni o'zgartirish",    "sr:gbtntext",   "primary", BE.editName),
-      ibtn("Havolani o'zgartirish", "sr:gbtnurl",    "primary", BE.editUrl),
+      ibtn("Nomni o'zgartirish", "sr:gbtntext", "primary", BE.editName),
+      ibtn("Havolani o'zgartirish", "sr:gbtnurl", "primary", BE.editUrl),
     ],
     [
       ibtn("🎨 Rangni tanlash", "sr:gbtncolors", "primary"),
-      ibtn("O'chirish",          "sr:gbtnclear",  "danger", BE.chDelete),
+      ibtn("O'chirish", "sr:gbtnclear", "danger", BE.chDelete),
     ],
-    [ibtn("Orqaga", "sr:back", undefined, BE.backMenu)],
+    [ibtn("Orqaga", "sr:back", undefined, BE.backMenu)]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
@@ -358,39 +407,45 @@ async function renderGlobalSerialButtonEditor(ctx: MyContext, edit = true) {
 
 serialsHandler.callbackQuery("sr:gbtncolors", async (ctx) => {
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(
-    "🎨 <b>Knopka rangini tanlang:</b>",
-    {
+  await ctx
+    .editMessageText("🎨 <b>Knopka rangini tanlang:</b>", {
       reply_markup: kb(
         [
-          ibtn("Ko'k",   "sr:gbtnsty:primary", "primary"),
+          ibtn("Ko'k", "sr:gbtnsty:primary", "primary"),
           ibtn("Yashil", "sr:gbtnsty:success", "success"),
-          ibtn("Qizil",  "sr:gbtnsty:danger",  "danger"),
-          ibtn("Random", "sr:gbtnsty:random",  "success"),
+          ibtn("Qizil", "sr:gbtnsty:danger", "danger"),
+          ibtn("Random", "sr:gbtnsty:random", "success"),
         ],
-        [ibtn("Orqaga", "sr:btnlist:0", undefined, BE.backMenu)],
+        [ibtn("Orqaga", "sr:btnlist:0", undefined, BE.backMenu)]
       ),
-    }
-  ).catch(() => {});
+    })
+    .catch(() => {});
 });
 
 serialsHandler.callbackQuery("sr:gbtntoggle", async (ctx) => {
   const cur = await getBool(KEYS.serialBtnEnabled, true);
   await setBool(KEYS.serialBtnEnabled, !cur);
-  await ctx.answerCallbackQuery({ text: !cur ? "✅ Knopka yoqildi" : "❌ Knopka o'chirildi", show_alert: true });
+  await ctx.answerCallbackQuery({
+    text: !cur ? "✅ Knopka yoqildi" : "❌ Knopka o'chirildi",
+    show_alert: true,
+  });
   await renderGlobalSerialButtonEditor(ctx);
 });
 
 serialsHandler.callbackQuery("sr:gbtntext", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), serialBtnField: "text" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>", { reply_markup: cancelKeyboard() });
+  await ctx.reply("Yangi knopka nomini yuboring. Masalan: <code>Tomosha qilish</code>", {
+    reply_markup: cancelKeyboard(),
+  });
 });
 
 serialsHandler.callbackQuery("sr:gbtnurl", async (ctx) => {
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), serialBtnField: "url" };
   await ctx.answerCallbackQuery();
-  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>", { reply_markup: cancelKeyboard() });
+  await ctx.reply("Knopka havolasini yuboring. Masalan: <code>https://t.me/kanal</code>", {
+    reply_markup: cancelKeyboard(),
+  });
 });
 
 serialsHandler.callbackQuery(/^sr:gbtnsty:(primary|success|danger|random)$/, async (ctx) => {
@@ -430,7 +485,9 @@ serialsHandler.on("message:text", async (ctx, next) => {
   }
 
   if (!isValidUrl(text)) {
-    await ctx.reply("❌ Havola <code>http://</code> yoki <code>https://</code> bilan boshlanishi kerak.");
+    await ctx.reply(
+      "❌ Havola <code>http://</code> yoki <code>https://</code> bilan boshlanishi kerak."
+    );
     return;
   }
 
@@ -450,16 +507,32 @@ serialsHandler.callbackQuery("sr:dellist", async (ctx) => {
     await ctx.editMessageText("📭 Serial yo'q.", { reply_markup: serialMenu() }).catch(() => {});
     return;
   }
-  const rows = serials.map((s) => [ibtn(`🗑 ${s.code} · ${s.title}`, `sr:delconf:${s.id}`, "danger")]);
+  const rows = serials.map((s) => [
+    ibtn(`🗑 ${s.code} · ${s.title}`, `sr:delconf:${s.id}`, "danger"),
+  ]);
   rows.push([ibtn("Orqaga", "sr:back", undefined, BE.home)]);
 
-  await ctx.editMessageText("🗑 Qaysi serialni o'chirasiz? (barcha sezon/qismlari bilan)", {
-    reply_markup: kb(...rows),
-  }).catch(() => {});
+  await ctx
+    .editMessageText("🗑 Qaysi serialni o'chirasiz? (barcha sezon/qismlari bilan)", {
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 });
 
 serialsHandler.callbackQuery(/^sr:delconf:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
+  // Baza kanaldagi episod postlarini ham o'chiramiz (episodlar kaskadli o'chadi,
+  // lekin kanal postlari mustaqil — aks holda o'lgan postlar qolib ketardi).
+  const episodes = await prisma.episode.findMany({
+    where: { season: { serialId: id }, baseMsgId: { not: null } },
+    select: { baseMsgId: true },
+  });
+  if (config.baseChannelId) {
+    for (const ep of episodes) {
+      if (ep.baseMsgId)
+        await ctx.api.deleteMessage(config.baseChannelId, ep.baseMsgId).catch(() => {});
+    }
+  }
   await prisma.serial.delete({ where: { id } }).catch(() => {});
   await ctx.answerCallbackQuery({ text: "🗑 O'chirildi" });
   await ctx.editMessageText("🗑 Serial o'chirildi.").catch(() => {});

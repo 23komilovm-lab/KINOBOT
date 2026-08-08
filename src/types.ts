@@ -6,6 +6,4 @@ export interface SessionData {
   scratch?: Record<string, unknown>;
 }
 
-export type MyContext = Context &
-  SessionFlavor<SessionData> &
-  ConversationFlavor;
+export type MyContext = Context & SessionFlavor<SessionData> & ConversationFlavor;
