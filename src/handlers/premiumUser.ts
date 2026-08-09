@@ -18,6 +18,12 @@ import type { MyContext } from "../types.js";
 
 export const premiumHandler = new Composer<MyContext>();
 
+/**
+ * To'lov holati (chek kutish) qancha vaqt yaroqli. Bu vaqtdan ko'p o'tsa holat
+ * o'chiriladi — aks holda eskirgan/fake chek xabarlari Payment yozuviga aylanardi.
+ */
+const PREM_BUY_TTL_MS = 30 * 60 * 1000;
+
 /** Premium taklifi xabari (limit tugaganda, /premium yoki obuna so'rovi ostidagi tugma orqali) */
 export async function sendPremiumPrompt(
   ctx: MyContext,
@@ -35,15 +41,18 @@ export async function sendPremiumPrompt(
     `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium obuna</b>\n\n` +
     (reason ? `${reason}\n\n` : "") +
     `Premium a'zolik bilan botdan <b>to'liq erkin</b> foydalanasiz:\n\n` +
-    `✅ <b>Cheksiz</b> kino va serial — limitsiz\n` +
+    `✅ <b>Cheksiz</b> kino va serial\n` +
     `✅ <b>Majburiy obunasiz</b> — hech qanday kanal so'ralmaydi\n` +
     `✅ <b>Cheksiz AI yordamchi</b> — tavsiya + rasm orqali kino topish\n` +
-    `✅ Reklama va kutishlarsiz, eng tez xizmat\n\n`;
+    `✅ Reklamasiz, kutishsiz — eng tez xizmat`;
 
   if (tariffs.length === 0) {
-    const text = head + `Hozircha tariflar sozlanmagan. Admin bilan bog'laning.`;
-    if (edit) await ctx.editMessageText(text).catch(() => ctx.reply(text));
-    else await ctx.reply(text);
+    const text = head + `\n\nHozircha tariflar sozlanmagan. Admin bilan bog'laning.`;
+    if (edit)
+      await ctx
+        .editMessageText(text, { reply_markup: contactAdminKb() })
+        .catch(() => ctx.reply(text, { reply_markup: contactAdminKb() }));
+    else await ctx.reply(text, { reply_markup: contactAdminKb() });
     return;
   }
 
@@ -53,10 +62,12 @@ export async function sendPremiumPrompt(
   // Taqqoslash uchun eng qimmat kunlik narx (odatda eng qisqa tarif)
   const worstPerDay = Math.max(...tariffs.map(perDay));
 
-  const lines: string[] = [head, `<b>Tarifni tanlang:</b>`];
+  const lines: string[] = [head, "", `<b>Tarifni tanlang:</b>`];
   const rows = tariffs.map((t) => {
     const pd = perDay(t);
     const isBest = pd <= bestPerDay + 0.01;
+    // Yagona tarif bo'lsa "eng foydali" taqqoslash ma'nosiz — belgi yashiriladi.
+    const showBest = tariffs.length > 1 && isBest;
     // Eng qisqa/qimmat tarifga nisbatan tejash foizi
     const saving = worstPerDay > 0 ? Math.round((1 - pd / worstPerDay) * 100) : 0;
 
@@ -73,16 +84,16 @@ export async function sendPremiumPrompt(
     info += `<b>${priceStr} so'm</b>`;
     if (hasOld) info += ` 🎁 <b>-${offPct}%</b>`;
     info += `\n   <i>${perDayStr} so'm/kun</i>`;
-    if (isBest) info += `  ⭐️ <b>eng foydali</b>`;
+    if (showBest) info += `  ⭐️ <b>eng foydali</b>`;
     else if (saving >= 5) info += `  💰 yana ${saving}% tejash`;
     lines.push(info);
 
-    const btnLabel = isBest
+    const btnLabel = showBest
       ? `⭐️ ${t.label} — ${priceStr} so'm (eng foydali)`
       : `${t.label} — ${priceStr} so'm`;
     return [ibtn(btnLabel, `prem:buy:${t.id}`, isBest ? "success" : "primary")];
   });
-  rows.push([ibtn("⬅️ Orqaga", "prem:back", undefined, BE.backMenu)]);
+  rows.push([ibtn("Orqaga", "prem:back", undefined, BE.backMenu)]);
 
   const text = lines.join("\n");
   const markup = kb(...rows);
@@ -103,7 +114,7 @@ premiumHandler.command("premium", async (ctx) => {
       `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Sizda Premium faol!</b>\n\n` +
         `Amal qilish muddati: <b>${until.toLocaleDateString("ru-RU")}</b> gacha — <b>${daysLeft} kun</b> qoldi.\n\n` +
         `<i>Muddat tugagach majburiy obuna va limitlar qaytadan ishlaydi. ` +
-        `Tugashiga 3 kun qolganda eslatma yuboramiz.</i>`,
+        `Tugashiga 3 kun va 1 kun qolganda hamda tugagan kuni eslatma yuboramiz.</i>`,
       {
         reply_markup: kb(
           [ibtn("💎 Obunani uzaytirish", "prem:show", "success")],
@@ -130,7 +141,14 @@ premiumHandler.callbackQuery("prem:back", async (ctx) => {
   if (blocking.length > 0) {
     await editSubscriptionPrompt(ctx, notJoined);
   } else {
-    await ctx.deleteMessage().catch(() => {});
+    // Obuna kerak bo'lmasa shunchaki yopib tashlamaymiz — foydalanuvchi panel yopilganini
+    // va qayta ochish yo'lini ko'rishi kerak, aks holda "xabar g'oyib bo'ldi" tuyg'usi qoladi.
+    await ctx
+      .editMessageText(
+        `💎 Premium panel yopildi.\n\nQayta ochish uchun /premium buyrug'ini yuboring.`,
+        { reply_markup: kb([ibtn("💎 Premium panel", "prem:show", "primary")]) }
+      )
+      .catch(() => ctx.deleteMessage().catch(() => {}));
   }
 });
 
@@ -152,7 +170,7 @@ premiumHandler.callbackQuery(/^prem:buy:(\d+)$/, async (ctx) => {
       ibtn(`⭐ Stars orqali (${tariff.starsPrice} ⭐)`, `pm:stars:${tariff.id}`, "success"),
     ]);
   }
-  rows.push([ibtn("⬅️ Orqaga", "prem:show", undefined, BE.backMenu)]);
+  rows.push([ibtn("Orqaga", "prem:show", undefined, BE.backMenu)]);
 
   await ctx
     .editMessageText(
@@ -160,7 +178,15 @@ premiumHandler.callbackQuery(/^prem:buy:(\d+)$/, async (ctx) => {
         `To'lov usulini tanlang:`,
       { reply_markup: kb(...rows) }
     )
-    .catch(() => ctx.reply(`To'lov usulini tanlang:`, { reply_markup: kb(...rows) }));
+    // Edit ishlamasa (xabar o'chgan bo'lsa) to'liq matn bilan qayta chiqamiz — faqat
+    // "usulni tanlang" deb qisqartirilsa, foydalanuvchi tarif nomi/narxini yo'qotardi.
+    .catch(() =>
+      ctx.reply(
+        `💳 <b>${e.escapeHtml(tariff.label)}</b> — ${priceWithOld(tariff)} (${tariff.days} kun)\n\n` +
+          `To'lov usulini tanlang:`,
+        { reply_markup: kb(...rows) }
+      )
+    );
 });
 
 /** "eski narx (chizilgan) yangi narx -N%" ko'rinishidagi matn */
@@ -192,6 +218,8 @@ premiumHandler.callbackQuery(/^pm:(karta|ton):(\d+)$/, async (ctx) => {
     ...(ctx.session.scratch ?? {}),
     premBuyTariff: tariff.id,
     premBuyMethod: method,
+    // Chek kutish holatining boshlanish vaqti — PREM_BUY_TTL_MS dan eski bo'lsa bekor qilinadi.
+    premBuyAt: Date.now(),
   };
 
   const text =
@@ -215,8 +243,39 @@ premiumHandler.callbackQuery("prem:cancel", async (ctx) => {
   if (ctx.session.scratch) {
     delete ctx.session.scratch.premBuyTariff;
     delete ctx.session.scratch.premBuyMethod;
+    delete ctx.session.scratch.premBuyAt;
   }
-  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  // Tugmalarni olib tashlab, eski ko'rsatma matnini qoldirish adashtiradi —
+  // xabar "bekor qilindi" deb almashtiriladi va istasa qayta boshlash imkoni qoladi.
+  await ctx
+    .editMessageText("❌ To'lov bekor qilindi.", {
+      reply_markup: kb([ibtn("💎 Premium panel", "prem:show", "primary")]),
+    })
+    .catch(() => ctx.deleteMessage().catch(() => {}));
+});
+
+// Chek kutish holatida matn yuborilsa — qidiruvga tushib ketmasligi, balki chek rasm
+// kerakligi eslatilishi lozim. Aks holda foydalanuvchi "nima qilishim kerak" holatida qoladi.
+premiumHandler.on("message:text", async (ctx, next) => {
+  const tariffId = ctx.session.scratch?.premBuyTariff as number | undefined;
+  if (!tariffId) return next();
+
+  const text = ctx.message.text.trim();
+  if (text === "❌ Bekor qilish" || text === "/cancel") {
+    if (ctx.session.scratch) {
+      delete ctx.session.scratch.premBuyTariff;
+      delete ctx.session.scratch.premBuyMethod;
+      delete ctx.session.scratch.premBuyAt;
+    }
+    await ctx.reply("❌ To'lov bekor qilindi.");
+    return;
+  }
+
+  await ctx.reply(
+    `❌ Chek rasm sifatida yuborilishi kerak — matn qabul qilinmaydi.\n` +
+      `To'lovni amalga oshirib, <b>chek/screenshot</b> rasmini yuboring yoki ` +
+      `"❌ Bekor qilish" tugmasini bosing.`
+  );
 });
 
 // ⭐ Stars orqali — native Telegram to'lov (avtomatik, admin tasdig'i shart emas)
@@ -245,7 +304,7 @@ premiumHandler.on("pre_checkout_query", async (ctx) => {
   const payload = ctx.preCheckoutQuery.invoice_payload;
   const m = payload.match(/^stars:(\d+)$/);
   if (!m) {
-    await ctx.answerPreCheckoutQuery(false, "Noto'g'ri so'rov.");
+    await ctx.answerPreCheckoutQuery(false, "Xatolik yuz berdi. Qayta urinib ko'ring.");
     return;
   }
   const tariff = await prisma.tariff.findUnique({ where: { id: Number(m[1]) } });
@@ -323,7 +382,7 @@ premiumHandler.on("message:successful_payment", async (ctx) => {
     `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium yoqildi!</b>\n\n` +
       `To'lov Stars orqali muvaffaqiyatli qabul qilindi. Premium <b>${until.toLocaleDateString("ru-RU")}</b> gacha amal qiladi.\n` +
       `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉\n\n` +
-      `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
+      `<i>Muddat tugashiga 3 kun va 1 kun qolganda hamda tugagan kuni sizga eslatma yuboramiz.</i>`,
     { reply_markup: contactAdminKb() }
   );
 });
@@ -333,13 +392,31 @@ premiumHandler.on(["message:photo", "message:document"], async (ctx, next) => {
   const tariffId = ctx.session.scratch?.premBuyTariff as number | undefined;
   if (!tariffId) return next();
   const method = (ctx.session.scratch?.premBuyMethod as "karta" | "ton" | undefined) ?? "karta";
+  const boughtAt = (ctx.session.scratch?.premBuyAt as number | undefined) ?? 0;
+
+  // Chek holati 30 daqiqadan ko'p turib qolsa eskirgan hisoblanadi. Tasodifan yuborilgan
+  // yoki ancha keyin yuborilgan rasm Payment yozuviga aylanib qolmasligi kerak (fake chek).
+  if (Date.now() - boughtAt > PREM_BUY_TTL_MS) {
+    if (ctx.session.scratch) {
+      delete ctx.session.scratch.premBuyTariff;
+      delete ctx.session.scratch.premBuyMethod;
+      delete ctx.session.scratch.premBuyAt;
+    }
+    await ctx.reply(
+      `❌ To'lov holati eskirgan (30 daqiqadan ko'p o'tdi), chek qabul qilinmadi.\n` +
+        `Agar to'lov qilgan bo'lsangiz, /premium orqali qaytadan tarif tanlab chek yuboring.`
+    );
+    return;
+  }
 
   const tariff = await prisma.tariff.findUnique({ where: { id: tariffId } });
   if (!tariff) {
     if (ctx.session.scratch) {
       delete ctx.session.scratch.premBuyTariff;
       delete ctx.session.scratch.premBuyMethod;
+      delete ctx.session.scratch.premBuyAt;
     }
+    await ctx.reply("❌ Tarif topilmadi. /premium orqali qaytadan tanlang.");
     return;
   }
 
@@ -347,6 +424,7 @@ premiumHandler.on(["message:photo", "message:document"], async (ctx, next) => {
   if (ctx.session.scratch) {
     delete ctx.session.scratch.premBuyTariff;
     delete ctx.session.scratch.premBuyMethod;
+    delete ctx.session.scratch.premBuyAt;
   }
 
   const payment = await prisma.payment.create({

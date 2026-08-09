@@ -12,7 +12,7 @@ import {
   kb,
 } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
-import { resolveButtonStyle, isValidUrl } from "../../utils/contentButton.js";
+import { buttonStyleLabel, resolveButtonStyle, isValidUrl } from "../../utils/contentButton.js";
 import { todayUz, dayStartUz } from "../../utils/dateRange.js";
 import type { MyContext } from "../../types.js";
 import type { ChannelType } from "@prisma/client";
@@ -315,7 +315,7 @@ async function renderBtnSettings(ctx: MyContext, edit = true) {
       ibtn("Ko'k", "ch:subbtnsty:primary", "primary"),
       ibtn("Yashil", "ch:subbtnsty:success", "success"),
       ibtn("Qizil", "ch:subbtnsty:danger", "danger"),
-      ibtn("Random", "ch:subbtnsty:random", "success"),
+      ibtn("Tasodifiy", "ch:subbtnsty:random", "success"),
     ],
     [ibtn("Standartga qaytarish", "ch:subbtnreset", "danger")],
     [ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]
@@ -359,7 +359,7 @@ channelsHandler.callbackQuery("ch:subbtntext", async (ctx) => {
 channelsHandler.callbackQuery(/^ch:subbtnsty:(primary|success|danger|random)$/, async (ctx) => {
   const style = resolveButtonStyle(ctx.match[1]);
   await setSetting(KEYS.subCheckBtnStyle, style);
-  await ctx.answerCallbackQuery({ text: `Rang: ${style}` });
+  await ctx.answerCallbackQuery({ text: `Rang: ${buttonStyleLabel(style)}` });
   await renderBtnSettings(ctx);
 });
 

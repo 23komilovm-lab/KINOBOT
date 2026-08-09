@@ -10,6 +10,7 @@ import {
   acquireBulkLock,
   bulkSend,
   formatBulkResult,
+  isBulkCancelled,
   releaseBulkLock,
 } from "../../services/bulkSend.js";
 import type { MyContext } from "../../types.js";
@@ -42,7 +43,9 @@ export async function pushSurveyToUser(
     inline_keyboard.push(buttons.slice(i, i + perRow));
   const ikb = { inline_keyboard };
   // Asosiy xabar — muvaffaqiyatsiz bo'lsa chaqiruvchiga otiladi (bloklangan foydalanuvchini aniqlash uchun)
-  await ctx.api.sendMessage(Number(userId), survey.question, {
+  // Savol admin kiritgan matn — parse_mode HTML bilan ishlatiladi. Qochirilmasa bitta
+  // '<' yoki '&' butun ommaviy yuborishni FATAL deb to'xtatib qo'yardi.
+  await ctx.api.sendMessage(Number(userId), e.escapeHtml(survey.question), {
     reply_markup: ikb,
     parse_mode: "HTML",
   });
@@ -119,8 +122,8 @@ async function funnelMenu() {
   return kb(
     [ibtn("So'rovnoma yaratish", "fn:create", "success", BE.chAdd)],
     [ibtn("✨ Standart (Viloyat+Jins)", "fn:defaultcreate", "primary")],
-    [ibtn("Natijalar", "fn:results", "primary", BE.stats)],
-    [ibtn("So'rovnoma yuborish", "fn:send", "primary", BE.broadcast)],
+    [ibtn("Natijalar", "fn:stat:0", "primary", BE.stats)],
+    [ibtn("So'rovnoma yuborish", "fn:send:0", "primary", BE.broadcast)],
     [
       ibtn(
         geoOn ? "📍 Avto-manzil: Yoqilgan" : "📍 Avto-manzil: O'chirilgan",
@@ -128,7 +131,7 @@ async function funnelMenu() {
         geoOn ? "success" : "danger"
       ),
     ],
-    [ibtn("O'chirish", "fn:delete", "danger", BE.chDelete)],
+    [ibtn("O'chirish", "fn:delete:0", "danger", BE.chDelete)],
     [ibtn("Orqaga", "bc:menu", undefined, BE.backMenu)]
   );
 }
@@ -143,7 +146,7 @@ funnelHandler.callbackQuery("fn:geotoggle", async (ctx) => {
   const cur = await getBool(KEYS.geoDetectEnabled, false);
   await setBool(KEYS.geoDetectEnabled, !cur);
   await ctx.answerCallbackQuery({
-    text: !cur ? "✅ Avto-manzil aniqlash yoqildi" : "❌ O'chirildi",
+    text: !cur ? "✅ Avto-manzil aniqlash yoqildi" : "❌ Avto-manzil aniqlash o'chirildi",
     show_alert: true,
   });
   await ctx.editMessageReplyMarkup({ reply_markup: await funnelMenu() }).catch(() => {});
@@ -172,7 +175,7 @@ funnelHandler.callbackQuery("fn:defaultcreate", async (ctx) => {
               BE.broadcast
             ),
           ],
-          [ibtn("Menyuga", "fn:menu", "primary", BE.backMenu)]
+          [ibtn("Menyuga qaytish", "fn:menu", "primary", BE.backMenu)]
         ),
       })
       .catch(() => {});
@@ -219,7 +222,7 @@ funnelHandler.callbackQuery("fn:defaultcreate", async (ctx) => {
       {
         reply_markup: kb(
           [ibtn("▶️ Hozir yuborish", `fn:sendsurvey:${regionSurvey.id}`, "success", BE.broadcast)],
-          [ibtn("Menyuga", "fn:menu", "primary", BE.backMenu)]
+          [ibtn("Menyuga qaytish", "fn:menu", "primary", BE.backMenu)]
         ),
       }
     )
@@ -249,26 +252,59 @@ funnelHandler.callbackQuery("fn:create", async (ctx) => {
   await ctx
     .editMessageText(
       "1️⃣ So'rovnoma <b>sarlavhasini</b> kiriting (admin uchun, foydalanuvchiga ko'rinmaydi):",
-      { reply_markup: kb([ibtn("❌ Bekor", "fn:menu", "danger")]) }
+      { reply_markup: kb([ibtn("❌ Bekor qilish", "fn:menu", "danger")]) }
     )
     .catch(() => {});
 });
 
 // ─── Natijalar ───────────────────────────────────────────────────────────────
 
-funnelHandler.callbackQuery("fn:results", async (ctx) => {
-  await ctx.answerCallbackQuery();
-  const surveys = await prisma.survey.findMany({ orderBy: { createdAt: "desc" }, take: 20 });
+// So'rovnoma tanlash (natija/yuborish/o'chirish) — sahifalanadi, aks holda
+// 20 tadan ko'p so'rovnoma bo'lsa eskilarga umuman erishib bo'lmas edi.
+type SurveyPickerMode = "stat" | "send" | "delete";
+const FUNNEL_PAGE = 15;
+
+async function renderSurveyPicker(ctx: MyContext, mode: SurveyPickerMode, page: number) {
+  const total = await prisma.survey.count();
+  const pages = Math.max(1, Math.ceil(total / FUNNEL_PAGE));
+  const p = Math.min(page, pages - 1); // oxirgi sahifadagi so'rovnoma o'chirilsa clamp
+  const surveys = await prisma.survey.findMany({
+    orderBy: { createdAt: "desc" },
+    skip: p * FUNNEL_PAGE,
+    take: FUNNEL_PAGE,
+  });
   if (surveys.length === 0) {
     await ctx.answerCallbackQuery({ text: "Hozircha so'rovnoma yo'q.", show_alert: true });
     return;
   }
-  const rows = surveys.map((s) => [ibtn(s.title, `fn:stat:${s.id}`, "primary")]);
+
+  const rows: ReturnType<typeof ibtn>[][] = [];
+  for (const s of surveys) {
+    if (mode === "stat") rows.push([ibtn(s.title, `fn:stat:${s.id}`, "primary")]);
+    else if (mode === "send") rows.push([ibtn(s.title, `fn:sendsurvey:${s.id}`, "primary")]);
+    else rows.push([ibtn(s.title, `fn:delask:${s.id}`, "danger", BE.chDelete)]);
+  }
+  const nav: ReturnType<typeof ibtn>[] = [];
+  if (p > 0) nav.push(ibtn("⬅️", `fn:${mode}:${p - 1}`));
+  nav.push(ibtn(`${p + 1}/${pages}`, "noop:fn"));
+  if (p < pages - 1) nav.push(ibtn("➡️", `fn:${mode}:${p + 1}`));
+  rows.push(nav);
   rows.push([ibtn("Orqaga", "fn:menu", undefined, BE.backMenu)]);
-  await ctx
-    .editMessageText("<b>Qaysi so'rovnoma natijasi?</b>", { reply_markup: kb(...rows) })
-    .catch(() => {});
+
+  const titles: Record<SurveyPickerMode, string> = {
+    stat: "<b>Qaysi so'rovnoma natijasi?</b>",
+    send: "<b>Qaysi so'rovnomani yuborasiz?</b>",
+    delete: "<b>Qaysi so'rovnomani o'chirasiz?</b>",
+  };
+  await ctx.editMessageText(titles[mode], { reply_markup: kb(...rows) }).catch(() => {});
+}
+
+funnelHandler.callbackQuery(/^fn:(stat|send|delete):(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await renderSurveyPicker(ctx, ctx.match[1] as SurveyPickerMode, Number(ctx.match[2]));
 });
+
+funnelHandler.callbackQuery("noop:fn", (ctx) => ctx.answerCallbackQuery());
 
 funnelHandler.callbackQuery(/^fn:stat:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
@@ -309,7 +345,7 @@ funnelHandler.callbackQuery(/^fn:stat:(\d+)$/, async (ctx) => {
     .editMessageText(lines.join("\n"), {
       reply_markup: kb(
         [ibtn("Viloyat bo'yicha", `fn:statregion:${survey.id}`, "primary", BE.trend)],
-        [ibtn("Orqaga", "fn:results", undefined, BE.backMenu)]
+        [ibtn("Orqaga", "fn:stat:0", undefined, BE.backMenu)]
       ),
     })
     .catch(() => {});
@@ -337,6 +373,9 @@ funnelHandler.callbackQuery(/^fn:statregion:(\d+)$/, async (ctx) => {
   }
 
   const lines = ["<b>Viloyat bo'yicha natijalar:</b>", ""];
+  if (Object.keys(byRegion).length === 0) {
+    lines.push("<i>Bu so'rovnomaga hali javob berilmagan.</i>");
+  }
   for (const [region, opts] of Object.entries(byRegion).sort()) {
     const total = Object.values(opts).reduce((a, b) => a + b, 0);
     lines.push(`<b>${e.escapeHtml(region)}</b>: ${total} ta`);
@@ -354,20 +393,6 @@ funnelHandler.callbackQuery(/^fn:statregion:(\d+)$/, async (ctx) => {
 
 // ─── Yuborish ────────────────────────────────────────────────────────────────
 
-funnelHandler.callbackQuery("fn:send", async (ctx) => {
-  await ctx.answerCallbackQuery();
-  const surveys = await prisma.survey.findMany({ orderBy: { createdAt: "desc" }, take: 20 });
-  if (surveys.length === 0) {
-    await ctx.answerCallbackQuery({ text: "Hozircha so'rovnoma yo'q.", show_alert: true });
-    return;
-  }
-  const rows = surveys.map((s) => [ibtn(s.title, `fn:sendsurvey:${s.id}`, "primary")]);
-  rows.push([ibtn("Orqaga", "fn:menu", undefined, BE.backMenu)]);
-  await ctx
-    .editMessageText("<b>Qaysi so'rovnomani yuborasiz?</b>", { reply_markup: kb(...rows) })
-    .catch(() => {});
-});
-
 funnelHandler.callbackQuery(/^fn:sendsurvey:(\d+)$/, async (ctx) => {
   const surveyId = Number(ctx.match[1]);
   await ctx.answerCallbackQuery();
@@ -379,7 +404,7 @@ funnelHandler.callbackQuery(/^fn:sendsurvey:(\d+)$/, async (ctx) => {
         [ibtn("🧪 Sinov (faqat menga)", `fn:dosend:me`, "success")],
         [ibtn(`Hammaga (${count})`, `fn:dosend:all`, "primary", BE.stats)],
         [ibtn("Sana oralig'i bo'yicha", `fn:dosend:daterange`, "primary")],
-        [ibtn("Orqaga", "fn:send", undefined, BE.backMenu)]
+        [ibtn("Orqaga", "fn:send:0", undefined, BE.backMenu)]
       ),
     })
     .catch(() => {});
@@ -399,7 +424,7 @@ funnelHandler.callbackQuery(/^fn:dosend:(all|daterange|me)$/, async (ctx) => {
     setF(ctx, f);
     await ctx
       .editMessageText("Boshlanish sanasini kiriting (DD.MM.YYYY):", {
-        reply_markup: kb([ibtn("❌ Bekor", "fn:menu", "danger")]),
+        reply_markup: kb([ibtn("❌ Bekor qilish", "fn:menu", "danger")]),
       })
       .catch(() => {});
     return;
@@ -437,8 +462,10 @@ funnelHandler.callbackQuery(/^fn:dosend:(all|daterange|me)$/, async (ctx) => {
 
     try {
       await pushSurveyToUser(ctx, ctx.from.id, survey);
+      // Admin javoblari statistikaga YOZILMAYDI (index.ts svr:ans admin-guard).
+      // Pastdagi qoldiq tozalash eski test javoblari bo'lsa ham xavfsizroq.
       await ctx.reply(
-        `${ce("check")} Sinov sifatida sizga yuborildi (hisoblanmaydi, oldingi test javoblaringiz tozalandi).`
+        `${ce("check")} Sinov sifatida sizga yuborildi. Javoblaringiz statistikaga kirmaydi va profilingiz buzilmaydi.`
       );
     } catch {
       await ctx.reply("❌ Yuborib bo'lmadi.");
@@ -447,16 +474,10 @@ funnelHandler.callbackQuery(/^fn:dosend:(all|daterange|me)$/, async (ctx) => {
   }
 
   await ctx.answerCallbackQuery({ text: "Yuborilmoqda..." });
-  await sendSurveyToUsers(ctx, f.surveyId, "all");
+  await sendSurveyToUsers(ctx, f.surveyId);
 });
 
-async function sendSurveyToUsers(
-  ctx: MyContext,
-  surveyId: number,
-  targetType: string,
-  from?: Date,
-  to?: Date
-) {
+async function sendSurveyToUsers(ctx: MyContext, surveyId: number, from?: Date, to?: Date) {
   const survey = await prisma.survey.findUnique({
     where: { id: surveyId },
     include: { options: { orderBy: { sortOrder: "asc" } } },
@@ -477,7 +498,10 @@ async function sendSurveyToUsers(
   }
 
   const chatId = ctx.chat!.id;
-  const statusMsg = await ctx.reply(`Yuborilmoqda: 0 / ${total}...`);
+  // Katta so'rovnoma yuborilayotganda admin jarayonni to'xtata olsin.
+  // bc:stop tugmasi broadcast.ts'da ishlanadi (bir xil BULK_KEY qulfi).
+  const cancelKb = kb([ibtn("⛔️ To'xtatish", "bc:stop", "danger")]);
+  const statusMsg = await ctx.reply(`Yuborilmoqda: 0 / ${total}...`, { reply_markup: cancelKb });
   clearF(ctx);
 
   // Fon rejimida — webhook so'rovi daqiqalab ochiq qolmasin
@@ -486,10 +510,13 @@ async function sendSurveyToUsers(
       const result = await bulkSend({
         userIds: users.map((u) => u.id),
         send: (uid) => pushSurveyToUser(ctx, uid, survey),
+        isCancelled: () => isBulkCancelled(BULK_KEY),
         onProgress: async (r) => {
           if (r.processed < r.total) {
             await ctx.api
-              .editMessageText(chatId, statusMsg.message_id, `⏳ ${r.processed} / ${r.total}...`)
+              .editMessageText(chatId, statusMsg.message_id, `⏳ ${r.processed} / ${r.total}...`, {
+                reply_markup: cancelKb,
+              })
               .catch(() => {});
           }
         },
@@ -518,17 +545,26 @@ async function sendSurveyToUsers(
 
 // ─── O'chirish ───────────────────────────────────────────────────────────────
 
-funnelHandler.callbackQuery("fn:delete", async (ctx) => {
+// Tasdiqlash bosqichi — bitta bosishda so'rovnoma + barcha javoblar
+// qaytarib bo'lmaydigan o'chib ketmasin (bc:unblock oqimidagidek ikki qadam).
+funnelHandler.callbackQuery(/^fn:delask:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
-  const surveys = await prisma.survey.findMany({ orderBy: { createdAt: "desc" }, take: 20 });
-  if (surveys.length === 0) {
-    await ctx.answerCallbackQuery({ text: "So'rovnoma yo'q.", show_alert: true });
-    return;
-  }
-  const rows = surveys.map((s) => [ibtn(s.title, `fn:delconf:${s.id}`, "danger", BE.chDelete)]);
-  rows.push([ibtn("Orqaga", "fn:menu", undefined, BE.backMenu)]);
+  const survey = await prisma.survey.findUnique({
+    where: { id: Number(ctx.match[1]) },
+    select: { title: true },
+  });
+  if (!survey) return;
   await ctx
-    .editMessageText("<b>Qaysi so'rovnomani o'chirasiz?</b>", { reply_markup: kb(...rows) })
+    .editMessageText(
+      `⚠️ <b>${e.escapeHtml(survey.title)}</b> so'rovnomasi va unga berilgan ` +
+        `<b>barcha javoblar</b> qaytarib bo'lmaydigan o'chiriladi.\n\nDavom etasizmi?`,
+      {
+        reply_markup: kb(
+          [ibtn("🗑 Ha, o'chirish", `fn:delconf:${ctx.match[1]}`, "danger")],
+          [ibtn("Yo'q", "fn:delete:0", "primary")]
+        ),
+      }
+    )
     .catch(() => {});
 });
 
@@ -551,7 +587,7 @@ funnelHandler.on("message:text", async (ctx, next) => {
 
   const text = ctx.message.text.trim();
 
-  if (text === "❌ Bekor" || text === "/cancel") {
+  if (text === "❌ Bekor" || text === "❌ Bekor qilish" || text === "/cancel") {
     clearF(ctx);
     await ctx.reply("❌ Bekor qilindi.");
     return;
@@ -562,7 +598,7 @@ funnelHandler.on("message:text", async (ctx, next) => {
     f.state = "question";
     setF(ctx, f);
     await ctx.reply("2️⃣ Foydalanuvchiga ko'rsatiladigan <b>savol</b> matnini kiriting:", {
-      reply_markup: kb([ibtn("❌ Bekor", "fn:menu", "danger")]),
+      reply_markup: kb([ibtn("❌ Bekor qilish", "fn:menu", "danger")]),
     });
     return;
   }
@@ -578,7 +614,7 @@ funnelHandler.on("message:text", async (ctx, next) => {
       {
         reply_markup: kb([
           ibtn("✅ Tayyor", "fn:optsdone", "success"),
-          ibtn("❌ Bekor", "fn:menu", "danger"),
+          ibtn("❌ Bekor qilish", "fn:menu", "danger"),
         ]),
       }
     );
@@ -598,7 +634,7 @@ funnelHandler.on("message:text", async (ctx, next) => {
       {
         reply_markup: kb([
           ibtn("✅ Tayyor", "fn:optsdone", "success"),
-          ibtn("❌ Bekor", "fn:menu", "danger"),
+          ibtn("❌ Bekor qilish", "fn:menu", "danger"),
         ]),
       }
     );
@@ -615,7 +651,7 @@ funnelHandler.on("message:text", async (ctx, next) => {
     f.state = "sendDateTo";
     setF(ctx, f);
     await ctx.reply("Tugash sanasini kiriting (DD.MM.YYYY):", {
-      reply_markup: kb([ibtn("❌ Bekor", "fn:menu", "danger")]),
+      reply_markup: kb([ibtn("❌ Bekor qilish", "fn:menu", "danger")]),
     });
     return;
   }
@@ -634,7 +670,7 @@ funnelHandler.on("message:text", async (ctx, next) => {
     }
     if (!f.surveyId) return;
     await ctx.reply("⏳ Yuborilmoqda...");
-    await sendSurveyToUsers(ctx, f.surveyId, "daterange", range.gte, range.lte);
+    await sendSurveyToUsers(ctx, f.surveyId, range.gte, range.lte);
     return;
   }
 
@@ -685,14 +721,14 @@ async function saveSurvey(ctx: MyContext, f: FData) {
   await ctx.reply(
     `<b>So'rovnoma yaratildi!</b>\n\n` +
       `Sarlavha: <b>${e.escapeHtml(f.title)}</b>\n` +
-      `Savol: ${e.escapeHtml(f.question)}\n` +
+      `Savol: <b>${e.escapeHtml(f.question)}</b>\n` +
       `Variantlar: <b>${f.options.length}</b> ta\n` +
       (isRegion ? `Viloyat so'rovnomasi sifatida belgilandi.` : "") +
       (isGender ? `Jins so'rovnomasi sifatida belgilandi.` : ""),
     {
       reply_markup: kb(
         [ibtn("Hozir yuborish", `fn:sendsurvey:${survey.id}`, "success", BE.broadcast)],
-        [ibtn("Menyuga", "fn:menu", "primary", BE.backMenu)]
+        [ibtn("Menyuga qaytish", "fn:menu", "primary", BE.backMenu)]
       ),
     }
   );

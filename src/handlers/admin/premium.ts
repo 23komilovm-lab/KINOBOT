@@ -460,7 +460,7 @@ premiumAdminHandler.callbackQuery(/^prm:approve:(\d+)$/, async (ctx) => {
       `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Premium yoqildi!</b>\n\n` +
         `To'lovingiz tasdiqlandi. Premium <b>${until.toLocaleDateString("ru-RU")}</b> gacha amal qiladi.\n` +
         `Endi cheksiz va obunasiz foydalanishingiz mumkin! 🎉\n\n` +
-        `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
+        `<i>Muddat tugashiga 3 kun va 1 kun qolganda hamda tugagan kuni sizga eslatma yuboramiz.</i>`,
       { parse_mode: "HTML", reply_markup: CONTACT_MARKUP }
     )
     .catch(() => null);
@@ -638,7 +638,7 @@ async function settingsData() {
     `TON ma'lumoti: ${payInfoTon ? "✅ sozlangan" : "❌ yo'q"}\n` +
     `Stars narxi: Tariflar bo'limida, har tarif uchun alohida\n` +
     `Tugash ogohlantirishi: <b>${warn ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>\n\n` +
-    `<i>Bepul chegara: qaysi biri (kino soni yoki kun) birinchi tugasa premium so'raladi. ` +
+    `<i>Bepul limit: qaysi biri (kino soni yoki kun) birinchi tugasa premium so'raladi. ` +
     `AI so'rovlari alohida kunlik hisoblanadi.\n` +
     `Ogohlantirish: premium tugashiga 3 kun va 1 kun qolganda hamda tugagan kuni ` +
     `obunachiga uzaytirish taklifi yuboriladi.</i>`;
@@ -980,7 +980,7 @@ premiumAdminHandler.on("message:text", async (ctx, next) => {
         uid,
         `<tg-emoji emoji-id="5258093637450866522">💎</tg-emoji> <b>Sizga Premium berildi!</b>\n\n` +
           `${until.toLocaleDateString("ru-RU")} gacha amal qiladi. 🎉\n\n` +
-          `<i>Muddat tugashiga 3 kun qolganda sizga eslatma yuboramiz.</i>`,
+          `<i>Muddat tugashiga 3 kun va 1 kun qolganda hamda tugagan kuni sizga eslatma yuboramiz.</i>`,
         { parse_mode: "HTML", reply_markup: CONTACT_MARKUP }
       )
       .catch(() => null);

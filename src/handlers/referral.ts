@@ -35,7 +35,7 @@ export async function sendReferralInfo(ctx: MyContext): Promise<void> {
     head +
       progress +
       `<tg-emoji emoji-id="5260730055880876557">🔗</tg-emoji> Sizning havolangiz:\n<code>${link}</code>\n\n` +
-      `<i>Tugma orqali do'stlaringizga yuboring yoki havolani ulashing. Ular botga kirib kanallarga a'zo bo'lgach, referal hisoblanadi.</i>`,
+      `<i>Tugma orqali do'stlaringizga yuboring yoki havolani ulashing. Ular botga kirib kino/serial ko'rishni boshlasa, referal hisoblanadi.</i>`,
     { reply_markup: markup }
   );
 }

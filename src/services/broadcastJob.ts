@@ -108,7 +108,7 @@ export async function reconcileBroadcastJobs(_bot?: Bot<MyContext>): Promise<voi
     // halol matn: nima bo'lgani + qancha ishlangani + yangi broadcast taklifi.
     await notifyOwner(
       `⚠️ Broadcast #${job.id} qayta ishga tushirish paytida to'xtab qolgan edi.\n` +
-        `Holat: interrupted · ${job.processed}/${job.total} ta foydalanuvchi ishlandi.\n` +
+        `Holat: Uzilgan · ${job.processed}/${job.total} ta foydalanuvchi ishlandi.\n` +
         `Yuborilmaganlarga avtomatik qayta yuborish (to'liq-resume) hali yo'q — ` +
         `kerak bo'lsa admin panelda yangi 📢 Broadcast boshlang.`,
       `broadcast-reconcile-${job.id}`

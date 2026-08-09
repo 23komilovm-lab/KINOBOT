@@ -7,8 +7,30 @@ import type { MyContext } from "../../types.js";
 
 export const joinStatsHandler = new Composer<MyContext>();
 
+/**
+ * Panelni chiqaradi: aniq `messageId` berilsa o'sha xabarni tahrirlaydi (yangilash
+ * yangi xabar ochmaydi — eski panel yonida dublikat to'planmasligi uchun).
+ */
+async function sendPanel(
+  ctx: MyContext,
+  text: string,
+  markup: ReturnType<typeof kb>,
+  edit: boolean,
+  messageId?: number
+) {
+  if (messageId && ctx.from) {
+    await ctx.api
+      .editMessageText(ctx.from.id, messageId, text, { reply_markup: markup })
+      .catch(() => {});
+  } else if (edit) {
+    await ctx.editMessageText(text, { reply_markup: markup }).catch(() => {});
+  } else {
+    await ctx.reply(text, { reply_markup: markup });
+  }
+}
+
 /** So'rovlar statistikasini chizadi (callback javobini bermaydi) */
-async function renderStats(ctx: MyContext, edit = true) {
+async function renderStats(ctx: MyContext, edit = true, messageId?: number) {
   const channels = await prisma.channel.findMany({
     where: { type: "REQUEST", isActive: true },
     orderBy: { sortOrder: "asc" },
@@ -17,8 +39,7 @@ async function renderStats(ctx: MyContext, edit = true) {
   if (channels.length === 0) {
     const text = "📊 <b>So'rovlar statistikasi</b>\n\nSo'rovli kanal qo'shilmagan.";
     const markup = kb([ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]);
-    if (edit) await ctx.editMessageText(text, { reply_markup: markup }).catch(() => {});
-    else await ctx.reply(text, { reply_markup: markup });
+    await sendPanel(ctx, text, markup, edit, messageId);
     return;
   }
 
@@ -67,8 +88,7 @@ async function renderStats(ctx: MyContext, edit = true) {
       ? `⏳ Jami kutilmoqda: <b>${totalPending}</b>\n\n<i>Har bir kanal uchun alohida tasdiqlanadi — kanalni tanlang:</i>`
       : `✅ Kutilayotgan so'rov yo'q.`);
 
-  if (edit) await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
-  else await ctx.reply(text, { reply_markup: kb(...rows) });
+  await sendPanel(ctx, text, kb(...rows), edit, messageId);
 }
 
 joinStatsHandler.callbackQuery("ch:jrstats", async (ctx) => {
@@ -81,7 +101,9 @@ async function approveRequests(ctx: MyContext, channelId: bigint, limit?: number
   const pending = await prisma.joinRequest.findMany({
     where: { status: "pending", channelId },
     orderBy: { date: "asc" },
-    ...(limit ? { take: limit } : {}),
+    // `take: 0` = cheklovsiz (barchasini oladi) — salbiy yoki 0 berilsa
+    // hammasini tasdiqlashga aylanib qolmasligi uchun aniq >0 tekshiramiz.
+    ...(limit && limit > 0 ? { take: limit } : {}),
   });
 
   let approved = 0,
@@ -163,7 +185,16 @@ joinStatsHandler.callbackQuery(/^jr:approve:(-?\d+):(\d+|all)$/, async (ctx) => 
 // ============ MAXSUS SON YOZISH (bitta kanal uchun) ============
 joinStatsHandler.callbackQuery(/^jr:approvecustom:(-?\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
-  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), approveCustomChannelId: ctx.match[1] };
+  // Panel qaysi xabarda edi — tasdiqlangach shu xabarni yangilaymiz (dublikat chiqmasligi uchun).
+  const panelMsgId =
+    ctx.callbackQuery.message && "message_id" in ctx.callbackQuery.message
+      ? ctx.callbackQuery.message.message_id
+      : undefined;
+  ctx.session.scratch = {
+    ...(ctx.session.scratch ?? {}),
+    approveCustomChannelId: ctx.match[1],
+    ...(panelMsgId ? { approveCustomPanelMsg: panelMsgId } : {}),
+  };
   await ctx.reply("Nechta so'rovni tasdiqlash kerak? Sonni yuboring:", {
     reply_markup: cancelKeyboard(),
   });
@@ -185,13 +216,25 @@ joinStatsHandler.on("message:text", async (ctx, next) => {
   }
 
   const count = Number(text);
+  if (count <= 0) {
+    // 0 kiritilsa "hammasini tasdiqlash"ga aylanib qolmasligi kerak — holat saqlanadi,
+    // admin xatoni tuzatib qayta yozishi mumkin.
+    await ctx.reply("❌ 0 dan katta son kiriting.");
+    return;
+  }
+
   const channelId = BigInt(channelIdStr);
-  if (ctx.session.scratch) delete ctx.session.scratch.approveCustomChannelId;
+  const panelMsgId = ctx.session.scratch?.approveCustomPanelMsg as number | undefined;
+  if (ctx.session.scratch) {
+    delete ctx.session.scratch.approveCustomChannelId;
+    delete ctx.session.scratch.approveCustomPanelMsg;
+  }
 
   const { approved, failed } = await approveRequests(ctx, channelId, count);
   await ctx.reply(
     `✅ <b>${approved}</b> ta so'rov tasdiqlandi.` +
       (failed > 0 ? `\n⚠️ ${failed} ta tasdiqlanmadi.` : "")
   );
-  await renderStats(ctx, false);
+  // Yangi panel ochish o'rniga ochiq turgan panelni yangilaymiz.
+  await renderStats(ctx, true, panelMsgId);
 });

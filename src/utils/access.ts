@@ -152,14 +152,15 @@ export async function checkContentAccessResult(
   // Vaqt cheklovi
   if (freeDays > 0 && user?.firstRequestAt) {
     if (Date.now() - user.firstRequestAt.getTime() > freeDays * DAY_MS) {
-      await sendPremiumPrompt(ctx, "⏳ Bepul foydalanish muddati tugadi.");
+      // "Limit tugadi" oilasi yagona emoji/atamada — qaysi cheklov tugagani aniq bo'ladi
+      await sendPremiumPrompt(ctx, "💎 Bepul foydalanish muddati tugadi.");
       return { ok: false, reason: "quota" };
     }
   }
 
   // So'rov soni cheklovi
   if (freeReq > 0 && (user?.requestCount ?? 0) >= freeReq) {
-    await sendPremiumPrompt(ctx, "🔒 Bepul so'rovlar soni tugadi.");
+    await sendPremiumPrompt(ctx, "💎 Bepul so'rovlar limiti tugadi.");
     return { ok: false, reason: "quota" };
   }
 
@@ -170,7 +171,7 @@ export async function checkContentAccessResult(
     user?.contentRequestDay === today() &&
     (user?.contentRequestCount ?? 0) >= daily
   ) {
-    await sendPremiumPrompt(ctx, "📅 Bugungi bepul kino limiti tugadi. Ertaga qayta tiklanadi!");
+    await sendPremiumPrompt(ctx, "💎 Bugungi bepul limit tugadi. Ertaga qayta tiklanadi!");
     return { ok: false, reason: "quota" };
   }
 

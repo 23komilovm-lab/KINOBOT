@@ -149,7 +149,7 @@ broadcastHandler.callbackQuery("bc:target:all", async (ctx) => {
   await ctx
     .editMessageText(
       `👥 Jami: <b>${count}</b> ta foydalanuvchi\n\nXabarni yuboring (matn, rasm, video, fayl):`,
-      { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
+      { reply_markup: kb([ibtn("❌ Bekor qilish", "bc:menu", "danger")]) }
     )
     .catch(() => {});
 });
@@ -178,7 +178,7 @@ broadcastHandler.callbackQuery("bc:target:region", async (ctx) => {
   const rows = fitting.map((r) => [
     ibtn(`${r.region} (${r._count.id})`, `bc:region:${r.region}`, "primary"),
   ]);
-  rows.push([ibtn("❌ Bekor", "bc:menu", "danger")]);
+  rows.push([ibtn("❌ Bekor qilish", "bc:menu", "danger")]);
 
   await ctx
     .editMessageText("🗺 <b>Qaysi viloyat/shaharga yubormoqchisiz?</b>", {
@@ -195,7 +195,7 @@ broadcastHandler.callbackQuery(/^bc:region:(.+)$/, async (ctx) => {
   await ctx
     .editMessageText(
       `🗺 Viloyat: <b>${e.escapeHtml(region)}</b>\n👥 Foydalanuvchilar: <b>${count}</b>\n\nXabarni yuboring:`,
-      { reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]) }
+      { reply_markup: kb([ibtn("❌ Bekor qilish", "bc:menu", "danger")]) }
     )
     .catch(() => {});
 });
@@ -208,7 +208,7 @@ broadcastHandler.callbackQuery("bc:target:funnel", async (ctx) => {
   }
   await ctx.answerCallbackQuery();
   const rows = surveys.map((s) => [ibtn(s.title, `bc:survey:${s.id}`, "primary")]);
-  rows.push([ibtn("❌ Bekor", "bc:menu", "danger")]);
+  rows.push([ibtn("❌ Bekor qilish", "bc:menu", "danger")]);
   await ctx
     .editMessageText("📊 <b>Qaysi so'rovnoma javobchilariga yubormoqchisiz?</b>", {
       reply_markup: kb(...rows),
@@ -244,7 +244,7 @@ broadcastHandler.callbackQuery(/^bc:survey:(\d+)$/, async (ctx) => {
   rows.push([
     ibtn(`📊 Barcha javobchilar (${totalAnswers})`, `bc:survopt:${surveyId}:0`, "success"),
   ]);
-  rows.push([ibtn("❌ Bekor", "bc:menu", "danger")]);
+  rows.push([ibtn("❌ Bekor qilish", "bc:menu", "danger")]);
   await ctx
     .editMessageText(`📊 <b>${e.escapeHtml(survey.title)}</b>\n\nQaysi javob berganlar?`, {
       reply_markup: kb(...rows),
@@ -260,7 +260,7 @@ broadcastHandler.callbackQuery(/^bc:survopt:(\d+):(\d+)$/, async (ctx) => {
   setBcast(ctx, { state: "compose", target: { type: "funnel", surveyId, optionId }, buttons: [] });
   await ctx
     .editMessageText(`📊 Javobchilar: <b>${count}</b> ta\n\nXabarni yuboring:`, {
-      reply_markup: kb([ibtn("❌ Bekor", "bc:menu", "danger")]),
+      reply_markup: kb([ibtn("❌ Bekor qilish", "bc:menu", "danger")]),
     })
     .catch(() => {});
 });
@@ -315,7 +315,7 @@ broadcastHandler.on("message", async (ctx, next) => {
         ibtn("Ko'k", "bc:btnstyle:primary", "primary"),
         ibtn("Yashil", "bc:btnstyle:success", "success"),
         ibtn("Qizil", "bc:btnstyle:danger", "danger"),
-        ibtn("Random", "bc:btnstyle:random", "success"),
+        ibtn("Tasodifiy", "bc:btnstyle:random", "success"),
       ]),
     });
     return;
@@ -438,7 +438,7 @@ async function showPreview(ctx: MyContext, bcast: BcastData) {
         [ibtn("➕ Knopka qo'shish", "bc:addbtn", "primary", BE.chAdd)],
         ...(btnCount > 0 ? [[ibtn("🗑 Barcha knopkalarni tozalash", "bc:clearbtn", "danger")]] : []),
         [ibtn("▶️ Yuborish", "bc:confirm", "success", BE.check)],
-        [ibtn("❌ Bekor", "bc:menu", "danger")]
+        [ibtn("❌ Bekor qilish", "bc:menu", "danger")]
       ),
     }
   );
@@ -520,8 +520,8 @@ broadcastHandler.callbackQuery("bc:confirm", async (ctx) => {
       {
         reply_markup: kb(
           [ibtn(`✅ Ha, ${users.length} kishiga yuborish`, "bc:send", "success", BE.check)],
-          [ibtn("⬅️ Orqaga", "bc:preview", undefined, BE.backMenu)],
-          [ibtn("❌ Bekor", "bc:menu", "danger")]
+          [ibtn("Orqaga", "bc:preview", undefined, BE.backMenu)],
+          [ibtn("❌ Bekor qilish", "bc:menu", "danger")]
         ),
       }
     )
@@ -672,7 +672,7 @@ async function runBroadcast(
       record = await saveBroadcastRecord(bcast, result);
     }
 
-    const rows = [[ibtn("Menyuga", "bc:menu", "primary", BE.backMenu)]];
+    const rows = [[ibtn("Menyuga qaytish", "bc:menu", "primary", BE.backMenu)]];
     if (record && result.failedIds.length > 0) {
       rows.unshift([
         ibtn(
@@ -820,7 +820,7 @@ broadcastHandler.callbackQuery(/^bc:hist:(\d+)$/, async (ctx) => {
   // 0 qoladi va chalg'itadi. Status belgisi + interrupted uchun processed ko'rsatiladi.
   const statusBadge =
     b.status === "interrupted"
-      ? `🟠 <b>Interrupted</b> — jarayon o'rtasida to'xtadi`
+      ? `🟠 <b>Uzilgan</b> — jarayon o'rtasida to'xtadi`
       : b.status === "aborted"
         ? `⛔️ <b>To'xtatilgan</b>`
         : `✅ <b>Yakunlangan</b>`;
@@ -1010,7 +1010,7 @@ broadcastHandler.callbackQuery("bc:unblock", async (ctx) => {
       {
         reply_markup: kb(
           [ibtn(`♻️ Ha, ${count} tasini tiklash`, "bc:unblock:yes", "success")],
-          [ibtn("❌ Bekor", "bc:menu", "danger")]
+          [ibtn("❌ Bekor qilish", "bc:menu", "danger")]
         ),
       }
     )
@@ -1028,7 +1028,7 @@ broadcastHandler.callbackQuery("bc:unblock:yes", async (ctx) => {
   });
   await ctx
     .editMessageText(`${ce("check")} <b>${res.count}</b> ta foydalanuvchi ro'yxatga qaytarildi.`, {
-      reply_markup: kb([ibtn("Menyuga", "bc:menu", "primary", BE.backMenu)]),
+      reply_markup: kb([ibtn("Menyuga qaytish", "bc:menu", "primary", BE.backMenu)]),
     })
     .catch(() => {});
 });

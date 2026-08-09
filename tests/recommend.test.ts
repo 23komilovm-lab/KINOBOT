@@ -33,6 +33,8 @@ beforeEach(() => {
   vi.mocked(isAdmin).mockReturnValue(false);
   vi.mocked(isPremiumActive).mockReturnValue(false);
   vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+  // Ko'rilgan kinolar so'rovi default bo'sh — /random hovuzni to'liq tanlaydi
+  vi.mocked(prisma.watchEvent.findMany).mockResolvedValue([] as never[]);
   // recordWatch ichida `.catch()` zanjirlanadi — promise qaytishi shart
   vi.mocked(prisma.watchEvent.create).mockResolvedValue({} as never);
 });

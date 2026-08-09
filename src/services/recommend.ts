@@ -158,12 +158,36 @@ export async function recommendMovies(ctx: MyContext, take = REC_PAGE_SIZE): Pro
 /** Views-og'irlikli tasodifiy kino: top-N hovuz ichidan JS weighted pick. */
 export async function weightedRandomMovie(ctx: MyContext): Promise<Movie | null> {
   const where = await premiumFilter(ctx);
-  const pool = await prisma.movie.findMany({
-    where,
+  const uid = ctx.from?.id;
+
+  // Ko'rilgan kinolar chiqarib tashlanadi — /random bir xil kinoni qayta
+  // beravermasin. Barchasi ko'rilgan bo'lsa (yoki admin bo'lsa) hovuz to'liq.
+  let exclude: { movieId: number | null }[] = [];
+  if (uid && !isAdmin(uid)) {
+    exclude = await prisma.watchEvent.findMany({
+      where: { userId: BigInt(uid), movieId: { not: null } },
+      select: { movieId: true },
+      distinct: ["movieId"],
+    });
+  }
+  const watchedIds = new Set(exclude.map((e) => e.movieId!).filter((id): id is number => id !== null));
+
+  let pool = await prisma.movie.findMany({
+    where: { ...where, id: watchedIds.size ? { notIn: [...watchedIds] } : undefined },
     orderBy: { views: "desc" },
     take: 100,
     select: { id: true, views: true },
   });
+  // Barchasi ko'rilgan — bo'sh qaytarmasdan, to'liq hovuzga qaytamiz
+  // (0-views kino ham imkoniyatga ega bo'lsin).
+  if (pool.length === 0) {
+    pool = await prisma.movie.findMany({
+      where,
+      orderBy: { views: "desc" },
+      take: 100,
+      select: { id: true, views: true },
+    });
+  }
   if (pool.length === 0) return null;
 
   // Og'irlik = 1 + views (0-views kino ham imkoniyatga ega bo'lsin).

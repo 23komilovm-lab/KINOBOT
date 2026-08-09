@@ -176,7 +176,7 @@ async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeybo
 
 const SUB_PROMPT_TEXT =
   `<b>Botdan foydalanish uchun obuna bo'ling:</b>\n\n` +
-  `<i>Yoki majburiy obunasiz, cheksiz foydalanish uchun — Premium obuna. 👇</i>`;
+  `<i>Yoki majburiy obunaga hojat qoldirmasdan, cheksiz foydalanish uchun — Premium obuna oling. 👇</i>`;
 
 /** Obuna so'rovi xabarini yuboradi */
 export async function sendSubscriptionPrompt(ctx: MyContext, channels: Channel[]): Promise<void> {

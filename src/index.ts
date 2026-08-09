@@ -3,7 +3,7 @@ import { run } from "@grammyjs/runner";
 import { webhookCallback } from "grammy";
 import { bot } from "./bot.js";
 import { prisma } from "./prisma.js";
-import { config, syncAdminStateFromDb } from "./config.js";
+import { config, isAdmin, syncAdminStateFromDb } from "./config.js";
 import { trackUser } from "./middlewares/user.js";
 import { formatError, log } from "./utils/logger.js";
 import { reconcileBroadcastJobs } from "./services/broadcastJob.js";
@@ -325,17 +325,24 @@ bot.callbackQuery(/^svr:ans:(\d+):(\d+)$/, async (ctx) => {
     return;
   }
 
-  await prisma.surveyResponse.create({ data: { surveyId, optionId, userId } }).catch(() => null);
+  // Admin javoblari — funnel'dagi "Sinov" tugmasi yoki tasodifiy test bo'lishi
+  // mumkin. Ular HAQIQIY so'rovnoma statistikasiga kirmasligi va admin profilining
+  // region/gender maydonini buzmasligi kerak (aks holda "Viloyat bo'yicha" broadcast
+  // noto'g'ri bo'lardi). Zanjir test qilish uchun baribir davom etadi.
+  const isAdminUser = isAdmin(ctx.from.id);
+  if (!isAdminUser) {
+    await prisma.surveyResponse.create({ data: { surveyId, optionId, userId } }).catch(() => null);
 
-  if (survey.isRegionSurvey) {
-    await prisma.user
-      .update({ where: { id: userId }, data: { region: option.text } })
-      .catch(() => null);
-  }
-  if (survey.isGenderSurvey) {
-    await prisma.user
-      .update({ where: { id: userId }, data: { gender: option.text } })
-      .catch(() => null);
+    if (survey.isRegionSurvey) {
+      await prisma.user
+        .update({ where: { id: userId }, data: { region: option.text } })
+        .catch(() => null);
+    }
+    if (survey.isGenderSurvey) {
+      await prisma.user
+        .update({ where: { id: userId }, data: { gender: option.text } })
+        .catch(() => null);
+    }
   }
 
   await ctx.answerCallbackQuery({ text: `✅ Javobingiz qabul qilindi: ${option.text}` });
@@ -354,7 +361,10 @@ bot.on("message:location", async (ctx, next) => {
   const region = nearestRegion(latitude, longitude);
   const userId = BigInt(ctx.from.id);
 
-  await prisma.user.update({ where: { id: userId }, data: { region } }).catch(() => null);
+  // Admin sinov vaqtida GPS yuborsa regioni buzilmasin (svr:ans'dagi kabi qoida)
+  if (!isAdmin(ctx.from.id)) {
+    await prisma.user.update({ where: { id: userId }, data: { region } }).catch(() => null);
+  }
   await ctx.reply(`📍 Manzilingiz aniqlandi: <b>${e.escapeHtml(region)}</b>`, {
     reply_markup: { remove_keyboard: true },
   });
@@ -368,7 +378,7 @@ bot.on("message:location", async (ctx, next) => {
   if (!survey) return;
 
   const option = survey.options.find((o) => o.text === region);
-  if (option) {
+  if (option && !isAdmin(ctx.from.id)) {
     await prisma.surveyResponse
       .upsert({
         where: { surveyId_userId: { surveyId: survey.id, userId } },

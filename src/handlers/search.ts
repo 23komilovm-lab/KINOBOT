@@ -65,6 +65,13 @@ searchHandler.callbackQuery(/^popular:page:(\d+)$/, async (ctx) => {
 async function renderPopular(ctx: MyContext, page: number, edit: boolean) {
   const PAGE = 10;
   const total = await prisma.movie.count();
+  // Bo'sh baza — bo'sh ro'yxat o'rniga aniq xabar (arandom'dagi kabi uslubda)
+  if (total === 0) {
+    const text = "📭 Hozircha kino yo'q.";
+    if (edit) await ctx.editMessageText(text).catch(() => ctx.reply(text));
+    else await ctx.reply(text);
+    return;
+  }
   const movies = await prisma.movie.findMany({
     orderBy: { views: "desc" },
     skip: page * PAGE,
@@ -75,11 +82,16 @@ async function renderPopular(ctx: MyContext, page: number, edit: boolean) {
     kb.text(`${m.title} (${m.views})`, `movie:${m.id}`).row();
   }
   const pages = Math.ceil(total / PAGE);
-  if (page > 0) kb.text("◀️", `popular:page:${page - 1}`);
+  if (pages > 1) {
+    if (page > 0) kb.text("◀️", `popular:page:${page - 1}`);
+    kb.text(`${page + 1}/${pages}`, "noop:popular");
+    if (page < pages - 1) kb.text("▶️", `popular:page:${page + 1}`);
+  } else if (page > 0) {
+    kb.text("◀️", `popular:page:${page - 1}`);
+  }
   kb.text("❌", "popular:close");
-  if (page < pages - 1) kb.text("▶️", `popular:page:${page + 1}`);
 
-  const text = `${ce("trendUp")} <b>Ko'p ko'rilgan kinolar</b>`;
+  const text = `${ce("trendUp")} <b>Mashhur kinolar</b>`;
   if (edit) {
     await ctx.editMessageText(text, { reply_markup: kb }).catch(async () => {
       await ctx.reply(text, { reply_markup: kb });
@@ -88,6 +100,8 @@ async function renderPopular(ctx: MyContext, page: number, edit: boolean) {
     await ctx.reply(text, { reply_markup: kb });
   }
 }
+
+searchHandler.callbackQuery("noop:popular", (ctx) => ctx.answerCallbackQuery());
 
 searchHandler.callbackQuery("popular:close", async (ctx) => {
   await ctx.answerCallbackQuery();
@@ -115,15 +129,15 @@ searchHandler.on("message:text", async (ctx, next) => {
 
     ctx.session.scratch = {
       ...(ctx.session.scratch ?? {}),
-      aiSeedQuery: `${code}-kodli kino topilmadi, menga shunga o'xshash yoki mashhur kinolarni tavsiya qiling`,
+      aiSeedQuery: `${code}-kodli kino yoki serial topilmadi, menga shunga o'xshash yoki mashhur kinolarni tavsiya qiling`,
     };
     const aiKb = new InlineKeyboard()
       .text("🤖 AI orqali qidirish", "search:ai")
       .row()
-      .text("Ko'p ko'rilganlar", "popular:page:0");
+      .text("Mashhur kinolar", "popular:page:0");
     await ctx.reply(
-      `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> <b>${code}</b> kodli kino topilmadi.\n\n` +
-        `Nom bilan ham qidirib ko'ring, yoki AI yordamchidan so'rang:`,
+      `${ce("search")} <b>${code}</b> kodli kino yoki serial topilmadi.\n\n` +
+        `Nom bilan ham qidirib ko'ring yoki AI yordamchidan so'rang:`,
       { reply_markup: aiKb }
     );
     return;
@@ -164,9 +178,9 @@ async function searchByName(ctx: MyContext, query: string) {
     const kb = new InlineKeyboard()
       .text("🤖 AI orqali qidirish", "search:ai")
       .row()
-      .text("Ko'p ko'rilganlar", "popular:page:0");
+      .text("Mashhur kinolar", "popular:page:0");
     await ctx.reply(
-      `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> "<b>${e.escapeHtml(query)}</b>" topilmadi.\n\nAI yordamchidan so'rang yoki mashhur kinolarni sinab ko'ring:`,
+      `${ce("search")} "<b>${e.escapeHtml(query)}</b>" topilmadi.\n\nAI yordamchidan so'rang yoki mashhur kinolarni sinab ko'ring:`,
       { reply_markup: kb }
     );
     return;
@@ -202,9 +216,14 @@ async function renderSearchResults(ctx: MyContext, page: number, edit: boolean) 
   kb.switchInlineCurrent(`🔎 Inline: ${query}`, query).row();
 
   const pages = Math.ceil(items.length / SEARCH_PAGE);
-  if (page > 0) kb.text("◀️", `search:page:${page - 1}`);
+  if (pages > 1) {
+    if (page > 0) kb.text("◀️", `search:page:${page - 1}`);
+    kb.text(`${page + 1}/${pages}`, "noop:search");
+    if (page < pages - 1) kb.text("▶️", `search:page:${page + 1}`);
+  } else if (page > 0) {
+    kb.text("◀️", `search:page:${page - 1}`);
+  }
   kb.text("❌", "search:close");
-  if (page < pages - 1) kb.text("▶️", `search:page:${page + 1}`);
 
   const text = `${ce("list")} <b>Topildi (${items.length}):</b>`;
   if (edit) {

@@ -31,7 +31,7 @@ async function ensurePremiumMovieAccess(ctx: MyContext, movie: Movie): Promise<b
 
   await sendPremiumPrompt(
     ctx,
-    `🔒 <b>"${movie.title}"</b> — <b>Premium kino</b>.\nUni ko'rish uchun premium obuna kerak.`
+    `🔒 <b>"${e.escapeHtml(movie.title)}"</b> — <b>Premium kino</b>.\nUni ko'rish uchun premium obuna kerak.`
   );
   return false;
 }
@@ -50,7 +50,7 @@ export async function ensurePremiumSerialAccess(ctx: MyContext, serial: Serial):
 
   await sendPremiumPrompt(
     ctx,
-    `🔒 <b>"${serial.title}"</b> — <b>Premium serial</b>.\nUni ko'rish uchun premium obuna kerak.`
+    `🔒 <b>"${e.escapeHtml(serial.title)}"</b> — <b>Premium serial</b>.\nUni ko'rish uchun premium obuna kerak.`
   );
   return false;
 }
@@ -68,7 +68,8 @@ export async function sendMovie(ctx: MyContext, movie: Movie): Promise<boolean> 
   const globalBtn = enabled ? await getGlobalButton("movie") : null;
   // Video ostida global knopka + tavsiya tugmasi. Tavsiya doim ko'rsatiladi —
   // sovuq foydalanuvchi uchun top-views ro'yxatini ochadi (foydasiz emas).
-  const recommendRow = [{ text: "🎯 Sizga yoqishi mumkin", callback_data: RECOMMEND_CALLBACK }];
+  // Emoji panel sarlavhasi bilan bir xil (⭐) — foydalanuvchi ularni bog'lasin.
+  const recommendRow = [{ text: "⭐ Sizga yoqishi mumkin", callback_data: RECOMMEND_CALLBACK }];
   try {
     await ctx.replyWithVideo(movie.fileId, {
       caption: movieCaption(movie),
@@ -118,11 +119,13 @@ export async function sendEpisode(
     `${ce("tv")} <b>${e.escapeHtml(serial.title)}</b>\n` +
     `${seasonNumber}-sezon · ${episode.number}-qism` +
     (episode.title ? `\n${e.escapeHtml(episode.title)}` : "");
+  // Kino kabi episod ostida ham tavsiya tugmasi — ikki kontent turida UX bir xil.
+  const recommendRow = [{ text: "⭐ Sizga yoqishi mumkin", callback_data: RECOMMEND_CALLBACK }];
 
   try {
     await ctx.replyWithVideo(episode.fileId, {
       caption,
-      reply_markup: globalBtn ? contentButtonMarkup(globalBtn) : undefined,
+      reply_markup: contentButtonMarkup(globalBtn ?? {}, [recommendRow]),
     });
   } catch (err) {
     log("warn", "Serial episodi yuborilmadi", {

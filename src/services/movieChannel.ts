@@ -88,9 +88,9 @@ export function genreEmoji(genre: string | null): string {
 export function movieChannelCaption(m: Movie, forChannel = false): string {
   const genreIcon = forChannel ? genreEmoji(m.genre) : tg(EM.genre, "🎭");
   const lines = [
-    `${tg(EM.name, "📹")} nomi : <b>${e.escapeHtml(m.title)}</b>`,
-    `${genreIcon} janri : <b>${m.genre ? e.escapeHtml(m.genre) : "—"}</b>`,
-    `${tg(EM.time, "🕔")} davomiyligi : <b>${m.duration ? formatDuration(m.duration) : "—"}</b>`,
+    `${tg(EM.name, "📹")} nomi: <b>${e.escapeHtml(m.title)}</b>`,
+    `${genreIcon} janri: <b>${m.genre ? e.escapeHtml(m.genre) : "—"}</b>`,
+    `${tg(EM.time, "🕔")} davomiyligi: <b>${m.duration ? formatDuration(m.duration) : "—"}</b>`,
   ];
   return lines.join("\n\n");
 }

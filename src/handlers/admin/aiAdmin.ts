@@ -339,7 +339,7 @@ aiAdminHandler.on("message:text", async (ctx, next) => {
   if (!answer) {
     await ctx.reply(
       lastFailureWasRateLimited()
-        ? "🤖 Hozir AI juda band (limit tugadi) — 1 daqiqadan so'ng qayta urinib ko'ring 🙏"
+        ? "🤖 Hozir AI juda band — 1 daqiqadan so'ng qayta urinib ko'ring. 🙏"
         : "🤖 Kechirasiz, hozir javob bera olmadim. Birozdan keyin urinib ko'ring."
     );
     return;

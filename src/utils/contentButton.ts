@@ -14,6 +14,20 @@ export function randomButtonStyle(): BtnStyle {
   return BUTTON_STYLES[Math.floor(Math.random() * BUTTON_STYLES.length)];
 }
 
+/** Rangni foydalanuvchiga tushunarli o'zbekcha etiketga aylantiradi */
+export function buttonStyleLabel(style?: string | null): string {
+  switch (style) {
+    case "success":
+      return "Yashil";
+    case "danger":
+      return "Qizil";
+    case "random":
+      return "Tasodifiy";
+    default:
+      return "Ko'k";
+  }
+}
+
 export function normalizeButtonStyle(style?: string | null): BtnStyle {
   return BUTTON_STYLES.includes(style as BtnStyle) ? (style as BtnStyle) : "primary";
 }

@@ -11,6 +11,9 @@ import type { MyContext } from "../types.js";
 
 export const startHandler = new Composer<MyContext>();
 
+// Botning doimiy "Kino kanali" tugmasi manzili. Eslatma: majburiy obuna kanallari
+// DB'dan boshqariladi (subscription.ts) — bu brend kanali bo'lib, o'zgarsa shu yerni
+// yangilash kerak (DB kanallari bilan sinxronlanmaydi).
 const CHANNEL_URL = "https://t.me/kinovaqti_00";
 
 const WELCOME =
@@ -40,7 +43,7 @@ function welcomeKeyboard() {
     ],
     [
       {
-        text: "Random",
+        text: "Tasodifiy",
         callback_data: "start:random",
         icon_custom_emoji_id: "5210771709258394044",
       },
@@ -69,16 +72,16 @@ startHandler.command("start", async (ctx) => {
     const refId = Number(payload.slice(4));
     if (Number.isInteger(refId)) await attachReferrer(uid, refId);
   } else if (payload === "premium") {
-    // Inline rejimdagi "Bepul chegara tugadi — Premium olish" tugmasidan
+    // Inline rejimdagi "Bepul limit tugadi — Premium olish" tugmasidan
     if (!isAdmin(uid)) {
       await sendPremiumPrompt(ctx);
       return;
     }
   }
 
-  // Admin — qisqa xabar + knopkalar
+  // Admin — qisqa xabar + knopkalar (boshqa admin modullari bilan bir xil sarlavha)
   if (isAdmin(uid)) {
-    await ctx.reply("<b>Admin panel</b>", {
+    await ctx.reply("Admin panel:", {
       reply_markup: adminMenuKeyboard(uid),
     });
     return;
@@ -105,7 +108,9 @@ startHandler.callbackQuery("sub:check", async (ctx) => {
   const blocking = notJoined.filter((c) => c.type !== "INSTAGRAM");
 
   if (blocking.length === 0) {
-    await ctx.answerCallbackQuery({ text: "✅ Rahmat! Endi foydalanishingiz mumkin." });
+    // Neytral popup — obuna o'rtasida bepul limit/premium hali ham bloklashi
+    // mumkin, "endi foydalanishingiz mumkin" deyish yolg'on va'da bo'lardi.
+    await ctx.answerCallbackQuery({ text: "✅ Rahmat! A'zolik tasdiqlandi." });
     await ctx.deleteMessage().catch(() => {});
 
     // Obuna oldidan so'ralgan kino/serial bo'lsa — to'liq gate QAYTA ishlaydi
@@ -119,7 +124,9 @@ startHandler.callbackQuery("sub:check", async (ctx) => {
       if (!res.ok) return;
     }
 
-    await sendWelcome(ctx);
+    // Kontent so'ralmagan bo'lsa to'liq welcome'ni TAKROR yubormaymiz (spam
+    // ko'rinishi). Foydalanuvchi welcome'ni allaqachon ko'rgan — qisqa tasdiq.
+    await ctx.reply("✅ A'zolik tasdiqlandi! Endi kino kodini yuboring yoki nomini yozib qidiring.");
   } else {
     await ctx.answerCallbackQuery({
       text: `❌ ${blocking.length} ta kanalga hali a'zo bo'lmadingiz!`,

@@ -81,7 +81,7 @@ inlineHandler.on("inline_query", async (ctx) => {
       }
     }
 
-    // Bepul chegara tugagan bo'lsa inline orqali ham kino berilmaydi.
+    // Bepul limit tugagan bo'lsa inline orqali ham kino berilmaydi.
     // MUHIM: inline so'rov har bosilgan harfda keladi, shuning uchun bu yerda
     // hisob OSHIRILMAYDI — faqat mavjud hisob tekshiriladi. Haqiqiy hisoblash
     // foydalanuvchi natijani tanlaganda (chosen_inline_result) bo'ladi.
@@ -89,7 +89,7 @@ inlineHandler.on("inline_query", async (ctx) => {
       await ctx.answerInlineQuery([], {
         cache_time: 0,
         is_personal: true,
-        button: { text: "💎 Bepul chegara tugadi — Premium olish", start_parameter: "premium" },
+        button: { text: "💎 Bepul limit tugadi — Premium olish", start_parameter: "premium" },
       });
       return;
     }
@@ -143,6 +143,23 @@ inlineHandler.on("inline_query", async (ctx) => {
       reply_markup: reply_markup.inline_keyboard.length ? reply_markup : undefined,
     };
   });
+
+  // Hech narsa topilmasa — bo'sh ro'yxat o'rniga tushunarli karta ko'rsatiladi.
+  // (Bo'sh natija chatda "Hech narsa topilmadi" deb umuman ko'rinmas edi.)
+  if (results.length === 0) {
+    results.push({
+      type: "article" as const,
+      id: "empty",
+      title: "😕 Hech narsa topilmadi",
+      description: "Boshqa nom bilan izlab ko'ring yoki botda AI yordamchidan so'rang.",
+      input_message_content: {
+        message_text:
+          `🔎 <b>${e.escapeHtml(q)}</b> bo'yicha inline natija topilmadi.\n\n` +
+          `Botda AI yordamchi orqali qidirib ko'ring.`,
+        parse_mode: "HTML" as const,
+      },
+    });
+  }
 
   await ctx.answerInlineQuery(results, {
     cache_time: 10,

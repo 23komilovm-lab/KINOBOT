@@ -1,6 +1,6 @@
 import { Composer } from "grammy";
 import { prisma } from "../prisma.js";
-import { e } from "../utils/emoji.js";
+import { ce, e } from "../utils/emoji.js";
 import { ibtn, kb, userMenuKeyboard, aiActiveKeyboard } from "../utils/keyboard.js";
 import { checkContentAccess, checkAiAccess, countAiRequest } from "../utils/access.js";
 import { normalizeTitle } from "../utils/translit.js";
@@ -344,8 +344,19 @@ function systemPrompt(context: string, userInfo: string): string {
 /** Provayder zanjiri butunlay muvaffaqiyatsiz bo'lganda ko'rsatiladigan xabar — sabab bo'yicha aniqroq */
 function aiFailureMessage(): string {
   return lastFailureWasRateLimited()
-    ? "🤖 Hozir AI juda band (limit tugadi) — 1 daqiqadan so'ng qayta urinib ko'ring 🙏"
+    ? "🤖 Hozir AI juda band — 1 daqiqadan so'ng qayta urinib ko'ring. 🙏"
     : "🤖 Kechirasiz, hozir AI javob bera olmadi. Birozdan keyin qayta urinib ko'ring.";
+}
+
+/**
+ * AI matnini Telegram HTML uchun xavfsizlashtiradi. Model har doim toza HTML
+ * chiqarmasligi mumkin (yopilmagan <b>, qochilmagan & < >) — bitta xato belgi
+ * butun xabarni yubormay qo'yardi. Shuning uchun barcha teglar olib tashlanadi
+ * va qolgan maxsus belgilar escape qilinadi: xabar hech qachon qulab tushmaydi,
+ * foydalanuvchi xom teglarni ham ko'rmaydi.
+ */
+function sanitizeAiHtml(input: string): string {
+  return e.escapeHtml(input.replace(/<[^>]*>/g, ""));
 }
 
 /**
@@ -385,9 +396,7 @@ async function runAiTurn(ctx: MyContext, text: string): Promise<void> {
   pushHistory(ctx, text, display || answer);
 
   if (display) {
-    await ctx.reply(display).catch(async () => {
-      await ctx.reply(e.escapeHtml(display));
-    });
+    await ctx.reply(sanitizeAiHtml(display)).catch(() => {});
   }
 
   if (listMatch) {
@@ -442,7 +451,7 @@ export async function enterAiChat(ctx: MyContext, seedQuery?: string): Promise<v
       `🔥 <i>"Eng zo'r jangari kinoni ber"</i>\n` +
       `🚀 <i>"Kosmos haqida kino bormi?"</i>\n` +
       `🎭 <i>"5 ta komediya tavsiya qil"</i>\n` +
-      `💬 yoki istalgan savolingizni.\n\n` +
+      `💬 yoki istalgan savolingizni yozing.\n\n` +
       `Men mos kinolarni topib, <b>to'g'ridan-to'g'ri yuborib</b> yoki chiroyli <b>tugmali ro'yxat</b> qilib beraman! 🎬\n\n` +
       `Chiqish uchun <b>${AI_EXIT}</b> tugmasini bosing.`,
     { reply_markup: aiActiveKeyboard() }
@@ -461,10 +470,11 @@ aiUserHandler.callbackQuery("ai:enter", async (ctx) => {
 });
 
 aiUserHandler.hears(AI_EXIT, async (ctx) => {
-  const wasActive = !!ctx.session.scratch?.aiChat;
   if (ctx.session.scratch) delete ctx.session.scratch.aiChat;
   clearHistory(ctx);
-  await ctx.reply(wasActive ? "AI yordamchidan chiqdingiz. 👋" : "Asosiy menyu:", {
+  // Colonli "Asosiy menyu:" xabari hech narsani ochmaydi (keyboard bitta tugma) —
+  // neytral chiqish xabari beriladi, reply keyboard asosiy menyuga qaytariladi.
+  await ctx.reply("AI suhbatidan chiqdingiz. 👋", {
     reply_markup: userMenuKeyboard(),
   });
 });
@@ -549,7 +559,7 @@ function buildListKeyboard(items: AiListItem[], page: number) {
   const totalPages = Math.ceil(items.length / PAGE_SIZE);
   if (totalPages > 1) {
     const nav: ReturnType<typeof ibtn>[] = [];
-    if (page > 0) nav.push(ibtn("⬅️ Orqaga", `ai:pg:${page - 1}`, "primary"));
+    if (page > 0) nav.push(ibtn("Orqaga", `ai:pg:${page - 1}`, "primary"));
     nav.push(ibtn(`${page + 1}/${totalPages}`, "noop:ai"));
     if (page < totalPages - 1) nav.push(ibtn("Oldinga ➡️", `ai:pg:${page + 1}`, "success"));
     rows.push(nav);
@@ -559,15 +569,25 @@ function buildListKeyboard(items: AiListItem[], page: number) {
   return kb(...rows);
 }
 
+/** Ro'yxat sessiyadan topilmasa — jimgina qaytmaslik (dead-flow) */
+function aiListStaleMessage(): string {
+  return "ℹ️ Ro'yxat eskirgan. AI'dan qaytadan so'rang.";
+}
+
 async function renderAiList(ctx: MyContext, edit: boolean) {
   const state = ctx.session.scratch?.aiList as { items: AiListItem[]; page: number } | undefined;
-  if (!state) return;
+  if (!state) {
+    await ctx.reply(aiListStaleMessage());
+    return;
+  }
   const markup = buildListKeyboard(state.items, state.page);
 
   if (edit) {
     await ctx.editMessageReplyMarkup({ reply_markup: markup }).catch(() => {});
   } else {
-    await ctx.reply(`🎯 <b>Tavsiya etilgan kinolar</b> (${state.items.length} ta):`, {
+    // Sarlavha video ostidagi tugma bilan bitta nom ("Sizga yoqishi mumkin")
+    // — bir xil tavsiya tushunchasi turli nomlar bilan atalmasin.
+    await ctx.reply(`${ce("star")} <b>Sizga yoqishi mumkin</b> (${state.items.length} ta):`, {
       reply_markup: markup,
     });
   }
@@ -662,7 +682,7 @@ async function handlePhotoSearch(ctx: MyContext): Promise<void> {
   ]);
 
   await ctx.reply(
-    `<tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> Rasmda: <b>${e.escapeHtml(title)}</b>` +
+    `${ce("search")} Rasmda: <b>${e.escapeHtml(title)}</b>` +
       (year && year !== "-" ? ` (${e.escapeHtml(year)})` : "") +
       (info ? `\n<i>${e.escapeHtml(info)}</i>` : "")
   );
@@ -694,13 +714,20 @@ aiUserHandler.callbackQuery(/^ai:watch:([ms]\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   // To'liq gate + bitta count delivery.ts ichida — bu yerda QAYTA tekshirish
   // (checkContentAccess) ikki marta hisoblashga olib kelardi.
-  await deliverPrefixedCode(ctx, ctx.match[1]).catch(() => {});
+  const result = await deliverPrefixedCode(ctx, ctx.match[1]).catch(() => null);
+  // Kod bazada yo'q — jimgina hech narsa bo'lmasin, foydalanuvchiga aytamiz.
+  if (result && !result.delivered && !result.found) {
+    await ctx.reply("ℹ️ Kechirasiz, bu kino/serial hozircha mavjud emas.");
+  }
 });
 
 aiUserHandler.callbackQuery(/^ai:pg:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const state = ctx.session.scratch?.aiList as { items: AiListItem[]; page: number } | undefined;
-  if (!state) return;
+  if (!state) {
+    await ctx.reply(aiListStaleMessage());
+    return;
+  }
   state.page = Number(ctx.match[1]);
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiList: state };
   await renderAiList(ctx, true);
