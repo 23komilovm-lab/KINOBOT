@@ -1,7 +1,8 @@
 import { Composer } from "grammy";
+import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { adminMenuKeyboard, kb } from "../utils/keyboard.js";
-import { getUnsubscribedChannels } from "../utils/subscription.js";
+import { getUnsubscribedChannels, recordSubscriptionJoin } from "../utils/subscription.js";
 import { attachReferrer } from "../utils/referral.js";
 import { sendReferralInfo } from "./referral.js";
 import { weightedRandomMovie } from "../services/recommend.js";
@@ -100,6 +101,29 @@ startHandler.command("start", async (ctx) => {
   await sendWelcome(ctx);
 });
 
+// Obuna tugmasi bosilganda — sessionga kanalni eslab qolamiz, keyin kanalga yo'naltiramiz
+startHandler.callbackQuery(/^sub:join:(-?\d+)$/, async (ctx) => {
+  const channelId = BigInt(ctx.match[1]);
+  const uid = ctx.from.id;
+
+  // Sessionga "bot orqali" eslab qolamiz
+  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pendingSubscriptionChannel: channelId.toString() };
+
+  // Kanal URL ni topib, answerCallbackQuery bilan ochamiz
+  const ch = await prisma.channel.findUnique({ where: { chatId: channelId } });
+  if (!ch) {
+    await ctx.answerCallbackQuery({ text: "Kanal topilmadi.", show_alert: true });
+    return;
+  }
+  const url = ch.username ? `https://t.me/${ch.username.replace(/^@/, "")}` : (ch.inviteLink ?? "");
+  if (!url) {
+    await ctx.answerCallbackQuery({ text: "Kanal havolasi topilmadi.", show_alert: true });
+    return;
+  }
+  // answerCallbackQuery url parametri — foydalanuvchini to'g'ridan-to'g'ri kanalga yo'naltiradi
+  await ctx.answerCallbackQuery({ url });
+});
+
 // Obuna tekshirish — yangi xabar YUBORILMAYDI, faqat popup
 // Kesh bypass qilinadi — foydalanuvchi aynan hozir qo'shilganini tekshirmoqchi
 startHandler.callbackQuery("sub:check", async (ctx) => {
@@ -112,6 +136,14 @@ startHandler.callbackQuery("sub:check", async (ctx) => {
     // mumkin, "endi foydalanishingiz mumkin" deyish yolg'on va'da bo'lardi.
     await ctx.answerCallbackQuery({ text: "✅ Rahmat! A'zolik tasdiqlandi." });
     await ctx.deleteMessage().catch(() => {});
+
+    // Sessionda "bot orqali" belgilangan kanal bo'lsa — ChannelEvent yozamiz
+    const pendingChStr = ctx.session.scratch?.pendingSubscriptionChannel as string | undefined;
+    if (pendingChStr) {
+      const channelId = BigInt(pendingChStr);
+      await recordSubscriptionJoin(ctx, uid, channelId);
+      if (ctx.session.scratch) delete ctx.session.scratch.pendingSubscriptionChannel;
+    }
 
     // Obuna oldidan so'ralgan kino/serial bo'lsa — to'liq gate QAYTA ishlaydi
     // (obuna o'rtasida bepul limit tugagan bo'lishi mumkin). Kvota bloklasa

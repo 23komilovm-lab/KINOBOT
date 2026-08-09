@@ -64,11 +64,23 @@ async function renderStats(ctx: MyContext, edit = true, messageId?: number) {
       prisma.joinRequest.count({ where: { channelId: cid, status: "pending" } }),
     ]);
 
+    // Bot tracking havolasi statistikasi (ChannelEvent orqali)
+    let botTrackingLine = "";
+    if (ch.botInviteLink) {
+      const botJoins = await prisma.channelEvent.count({
+        where: { channelId: cid, type: "join", source: "bot" },
+      });
+      if (botJoins > 0) {
+        botTrackingLine = `\n  🔗 Bot orqali: <b>${botJoins}</b> qo'shilgan`;
+      }
+    }
+
     lines.push(
       `📢 <b>${e.escapeHtml(ch.title)}</b>\n` +
         `  Bugun: <b>${todayN}</b> | Kecha: <b>${yestN}</b>\n` +
         `  Bu oy: <b>${monthN}</b> | Jami: <b>${total}</b>\n` +
-        `  Kutilmoqda: <b>${pending}</b>`
+        `  Kutilmoqda: <b>${pending}</b>` +
+        botTrackingLine
     );
 
     totalPending += pending;

@@ -50,6 +50,42 @@ interface PendingChannel {
   type: ChannelType;
 }
 
+/**
+ * Bot tracking havolasini yaratadi yoki mavjudini qaytaradi.
+ * Har kanal uchun faqat bitta "bot_tracking" nomli havola yaratiladi.
+ */
+async function getOrCreateBotInviteLink(
+  ctx: MyContext,
+  chatId: bigint
+): Promise<string | null> {
+  // Avval DB dan tekshiramiz
+  const ch = await prisma.channel.findUnique({
+    where: { chatId },
+    select: { botInviteLink: true },
+  });
+  if (ch?.botInviteLink) return ch.botInviteLink;
+
+  // Yangi "bot_tracking" havolasi yaratamiz
+  try {
+    const link = await ctx.api.createChatInviteLink(Number(chatId), {
+      name: "bot_tracking",
+      creates_join_request: false,
+    });
+    await prisma.channel.update({
+      where: { chatId },
+      data: { botInviteLink: link.invite_link },
+    });
+    return link.invite_link;
+  } catch (err) {
+    // Botda can_invite_users huquqi yo'qligi mumkin
+    console.warn(
+      `[channels] botInviteLink yaratib bo'lmadi chatId=${chatId}:`,
+      (err as Error).message
+    );
+    return null;
+  }
+}
+
 async function channelMenuData() {
   const enabled = await getBool(KEYS.forceSubEnabled, true);
   const count = await prisma.channel.count();
@@ -208,6 +244,17 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
     reqLine = `\n⏳ Kutilayotgan so'rovlar: <b>${pending}</b>`;
   }
 
+  // Bot tracking havola statistikasi (ChannelEvent orqali)
+  let inviteStatsLine = "";
+  if (c.type !== "INSTAGRAM" && c.botInviteLink) {
+    const botJoins = await prisma.channelEvent.count({
+      where: { channelId: c.chatId, type: "join", source: "bot" },
+    });
+    if (botJoins > 0) {
+      inviteStatsLine = `\n🔗 Bot orqali qo'shilgan: <b>${botJoins}</b> ta`;
+    }
+  }
+
   const text =
     `<tg-emoji emoji-id="${BE.channel}">📢</tg-emoji> <b>${e.escapeHtml(c.title)}</b>\n` +
     `Tur: <b>${TYPE_LABEL[c.type]}</b>\n` +
@@ -219,7 +266,8 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
     `1 oy: <b>${joinMonth}</b>\n` +
     `Jami (kuzatilgan): <b>${joinTotal}</b>\n` +
     `Umumiy a'zolar: <b>${memberCount}</b>` +
-    reqLine;
+    reqLine +
+    inviteStatsLine;
 
   const rows: ReturnType<typeof ibtn>[][] = [
     [
@@ -745,7 +793,7 @@ async function processChannelInfo(ctx: MyContext, info: PendingChannel) {
     await ctx.reply(
       `✅ Kanal aniqlandi: <b>${e.escapeHtml(title)}</b>\n\n` +
         `So'rovli kanal uchun <b>join-request havolasi</b> kerak.\n\n` +
-        `ℹ️ Bu havola <b>"Apply to join"</b> (qo'shilish so'rovi) turidagi havola bo'lishi kerak.\n` +
+        `ℹ️ Bu havola <b>"Apply to join"</b> (qo'shilish so'rovi) turdagi havola bo'lishi kerak.\n` +
         `Telegram'da kanal Sozlamalari → Invite Links → <b>"Request Admin Approval"</b> yoqilgan havola yarating va shu yerga yuboring.\n\n` +
         `Yoki pastdagi tugma orqali bot o'zi yaratsin.`,
       {
@@ -841,15 +889,22 @@ async function finishAddChannel(
     return;
   }
 
+  // Bot tracking havolasini yaratamiz (INSTAGRAM uchun emas)
+  let botInviteLink: string | null = null;
+  if (type !== "INSTAGRAM") {
+    botInviteLink = await getOrCreateBotInviteLink(ctx, BigInt(chatId));
+  }
+
   await ctx.reply(
     `${ce("check")} <b>Qo'shildi!</b>\n\n<b>${e.escapeHtml(title)}</b>\n` +
       (type === "INSTAGRAM"
         ? `📸 ${e.escapeHtml(inviteLink ?? "")}`
         : username
-          ? `@${e.escapeHtml(username)}`
-          : inviteLink
-            ? e.escapeHtml(inviteLink)
-            : "") +
+        ? `@${e.escapeHtml(username)}`
+        : inviteLink
+        ? e.escapeHtml(inviteLink)
+        : "") +
+      (botInviteLink ? `\n🔗 Bot tracking: <code>${e.escapeHtml(botInviteLink)}</code>` : "") +
       `\nTur: <b>${type}</b>`,
     { reply_markup: { remove_keyboard: true } }
   );

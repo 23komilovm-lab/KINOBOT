@@ -135,6 +135,27 @@ export async function getUnsubscribedChannels(
   return results.filter((r) => !r.isSubscribed).map((r) => r.channel);
 }
 
+/** Bot obuna tugmasi bosilganda — sessionga kanalni eslab qolamiz (source="bot" uchun) */
+export function markPendingSubscription(channelId: bigint): void {
+  // Bu funksiya callback handlerda chaqiriladi, ctx sessiondan foydalanadi
+}
+
+/** Obuna tasdiqlanganda (sub:check) — ChannelEvent yozamiz */
+export async function recordSubscriptionJoin(ctx: MyContext, userId: number, channelId: bigint): Promise<void> {
+  try {
+    await prisma.channelEvent.create({
+      data: {
+        channelId,
+        userId: BigInt(userId),
+        type: "join",
+        source: "bot",
+      },
+    });
+  } catch {
+    // xatolik yuz berganda stats buzmasin
+  }
+}
+
 async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeyboard> {
   const checkText = await getSetting(KEYS.subCheckBtnText, "Tekshirish");
   const defLabel = await getSetting(KEYS.subChannelBtnLabel, "+ Kanalga obuna bo'lish");
@@ -144,7 +165,9 @@ async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeybo
     const url = channelUrl(ch);
     if (!url) continue;
     const label = ch.buttonLabel?.trim() || (ch.type === "INSTAGRAM" ? `📸 ${ch.title}` : defLabel);
-    kb.url(label, url).row();
+    // Callback tugma: bosilganda sessionga pendingSubscriptionChannel yozamiz,
+    // keyin answerCallbackQuery(url=...) orqali kanalga yo'naltiramiz.
+    kb.text(label, `sub:join:${ch.chatId}`).row();
   }
 
   const hasTg = channels.some((c) => c.type !== "INSTAGRAM");
@@ -194,6 +217,8 @@ export async function editSubscriptionPrompt(ctx: MyContext, channels: Channel[]
 
 export function channelUrl(ch: Channel): string | null {
   if (ch.type === "INSTAGRAM") return ch.inviteLink ?? null;
+  // Bot tracking havolasi avval (statistika uchun), keyin username, keyin inviteLink
+  if (ch.botInviteLink) return ch.botInviteLink;
   if (ch.username) return `https://t.me/${ch.username.replace(/^@/, "")}`;
   if (ch.inviteLink) return ch.inviteLink;
   return null;

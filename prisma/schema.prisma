@@ -199,6 +199,7 @@ model Channel {
   title       String
   username    String?
   inviteLink  String?     // PRIVATE/REQUEST uchun havola; INSTAGRAM uchun profil URL
+  botInviteLink String?   // Bot tracking havolasi (createChatInviteLink name="bot_tracking")
   type        ChannelType @default(PUBLIC)
   isActive    Boolean     @default(true)
   sortOrder   Int         @default(0)
@@ -234,10 +235,12 @@ model ChannelEvent {
   channelId BigInt
   userId    BigInt
   type      String   @default("join") // join | leave
+  source    String?  @default("unknown") // "bot" | "organic" | "unknown"
   date      DateTime @default(now())
 
   @@index([channelId, date])
   @@index([date])
+  @@index([channelId, source]) // bot/organic statistika uchun
   @@map("channel_events")
 }
 
