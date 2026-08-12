@@ -130,6 +130,20 @@ bot.on("chat_member", async (ctx) => {
     });
 
     await recordChannelJoin(BigInt(chatId), userId, source);
+
+    // SO'ROVLI KANAL: odam ichkariga kirdi — demak zayifkasi tasdiqlangan.
+    // Bot paneli orqali tasdiqlanganda status joinStats.ts da yoziladi, lekin
+    // egasi Telegram ILOVASIDA qo'lda tasdiqlasa bot faqat shu yo'l bilan
+    // biladi. Bo'lmasa "navbatda kutayapti" soni hech qachon kamaymaydi va
+    // "tasdiqlangan" 0 bo'lib qolaveradi — kanal paneli yolg'on ko'rsatadi.
+    if (ch.type === "REQUEST") {
+      await prisma.joinRequest
+        .updateMany({
+          where: { channelId: BigInt(chatId), userId: BigInt(userId), status: "pending" },
+          data: { status: "approved" },
+        })
+        .catch(() => null);
+    }
     return;
   }
 
