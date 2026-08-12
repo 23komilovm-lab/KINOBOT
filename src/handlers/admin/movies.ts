@@ -1,5 +1,6 @@
 import { Composer } from "grammy";
 import type { Conversation } from "@grammyjs/conversations";
+import { bot } from "../../bot.js";
 import { prisma } from "../../prisma.js";
 import { config, adminCan } from "../../config.js";
 import { ce, e } from "../../utils/emoji.js";
@@ -281,9 +282,13 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   // Baza kanalga arxiv posti — muvaffaqiyatsiz bo'lsa ham kino ishlayveradi
   if (config.baseChannelId) {
     try {
-      const sent = await ctx.api.sendVideo(config.baseChannelId, fileId, {
-        caption: `#kino #${code}\n🎬 ${e.escapeHtml(title)}`,
-      });
+      // conversation.external + bot.api: suhbat ichidagi `ctx.api` chaqiruvi
+      // qayta o'ynatishda Telegram'ga ketmay, log'dan bo'sh javob olishi mumkin.
+      const sent = await conversation.external(() =>
+        bot.api.sendVideo(config.baseChannelId!, fileId, {
+          caption: `#kino #${code}\n🎬 ${e.escapeHtml(title)}`,
+        })
+      );
       await conversation.external(() =>
         prisma.movie.update({ where: { id: movie.id }, data: { baseMsgId: sent.message_id } })
       );
@@ -296,7 +301,9 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   // Qisqa videoni kino kanalga tashlash
   let shortStatus: string;
   if (shortFileId) {
-    const { msgId, error } = await postToMovieChannel(ctx, movie, shortFileId);
+    const { msgId, error } = await conversation.external(() =>
+      postToMovieChannel(ctx, movie, shortFileId)
+    );
     if (msgId) {
       await conversation.external(() =>
         prisma.movie.update({ where: { id: movie.id }, data: { shortMsgId: msgId } })

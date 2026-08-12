@@ -1,5 +1,6 @@
 import { Composer } from "grammy";
 import type { Conversation } from "@grammyjs/conversations";
+import { bot } from "../../bot.js";
 import { prisma } from "../../prisma.js";
 import { config, adminCan } from "../../config.js";
 import { ce, e } from "../../utils/emoji.js";
@@ -282,9 +283,13 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   let baseMsgId: number | null = null;
   if (config.baseChannelId) {
     try {
-      const sent = await ctx.api.sendVideo(config.baseChannelId, fileId, {
-        caption: `#serial ${e.escapeHtml(serialTitle)} · S${seasonNum}E${epNum}`,
-      });
+      // conversation.external + bot.api — `ctx.api` suhbat ichida qayta
+      // o'ynatishga tushib, Telegram'ga bormasdan bo'sh javob qaytarishi mumkin.
+      const sent = await conversation.external(() =>
+        bot.api.sendVideo(config.baseChannelId!, fileId, {
+          caption: `#serial ${e.escapeHtml(serialTitle)} · S${seasonNum}E${epNum}`,
+        })
+      );
       baseMsgId = sent.message_id;
     } catch (err) {
       console.error(`🛑 Serial episod baza kanalga tashlanmadi (S${seasonNum}E${epNum}):`, err);

@@ -1,3 +1,4 @@
+import { bot } from "../bot.js";
 import { config } from "../config.js";
 import { e } from "../utils/emoji.js";
 import { log } from "../utils/logger.js";
@@ -166,12 +167,34 @@ export async function postToMovieChannel(
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     try {
       const btn = movieWatchButton(ctx.me.username, movie.code);
-      const sent = await ctx.api.sendVideo(config.movieChannelId, shortFileId, {
+      // DIQQAT: `bot.api`, `ctx.api` EMAS. Bu funksiya suhbat (conversation)
+      // ichidan chaqiriladi va `ctx.api` ga conversations plugini transformer
+      // o'rnatgan: qayta o'ynatish paytida chaqiruv Telegram'ga ketmasdan
+      // log'dan javob oladi. Log'da bu chaqiruv bo'lmasa javob bo'sh keladi —
+      // aynan shu "qisqa video tashlanmadi: noma'lum xato" ni bergan.
+      // `bot.api` transformer'siz, shuning uchun har doim haqiqiy yuboradi.
+      const sent = await bot.api.sendVideo(config.movieChannelId, shortFileId, {
         caption: movieChannelCaption(movie, true), // kanal — janrga mos ikonka
         parse_mode: "HTML",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         reply_markup: { inline_keyboard: [[btn]] } as any,
       });
+
+      // sendVideo na xato tashladi, na message_id qaytardi. Bu grammY
+      // conversations qayta o'ynatishida bo'ladi: suhbat ichidagi API chaqiruvi
+      // log'dan javob oladi va log'da bu chaqiruv yo'q bo'lsa natija bo'sh
+      // keladi. Ilgari bu jimgina "noma'lum xato" bo'lib chiqardi — endi aniq
+      // yozamiz, chunki ASL yuborish Telegram tomonida ketgan bo'lishi mumkin.
+      if (!sent?.message_id) {
+        lastError = `sendVideo javobi bo'sh (${JSON.stringify(sent)?.slice(0, 160) ?? "undefined"})`;
+        log("error", "Qisqa video: sendVideo message_id'siz qaytdi", {
+          movieCode: movie.code,
+          attempt: attempt + 1,
+          response: JSON.stringify(sent)?.slice(0, 300) ?? "undefined",
+        });
+        break; // qayta urinish foydasiz — muammo javobda, tarmoqda emas
+      }
+
       return { msgId: sent.message_id, error: null };
     } catch (err) {
       lastError = describeError(err);
