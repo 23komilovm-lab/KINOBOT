@@ -24,8 +24,6 @@ export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   openrouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
-  cerebrasApiKey: process.env.CEREBRAS_API_KEY ?? "",
-  githubModelsToken: process.env.GITHUB_MODELS_TOKEN ?? "",
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
   adminContactUrl: process.env.ADMIN_CONTACT_URL ?? "https://t.me/akajon_00",
 };

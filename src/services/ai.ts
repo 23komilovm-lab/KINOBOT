@@ -7,7 +7,7 @@ import { getSetting, KEYS } from "../utils/settings.js";
 // Kalit yo'q provayder avtomatik "mavjud emas" bo'ladi.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ProviderId = "groq" | "openrouter" | "cerebras" | "github" | "mistral" | "gemini";
+export type ProviderId = "groq" | "openrouter" | "mistral" | "gemini";
 
 interface Provider {
   id: ProviderId;
@@ -47,30 +47,12 @@ export const PROVIDERS: Provider[] = [
       { id: "openrouter/free", label: "OpenRouter Auto (free)" },
     ],
   },
-  {
-    id: "cerebras",
-    label: "Cerebras",
-    style: "openai",
-    baseUrl: "https://api.cerebras.ai/v1/chat/completions",
-    key: () => config.cerebrasApiKey,
-    models: [
-      { id: "llama-3.3-70b", label: "Llama 3.3 70B (juda tez)" },
-      { id: "llama3.1-8b", label: "Llama 3.1 8B" },
-    ],
-  },
-  {
-    id: "github",
-    label: "GitHub Models",
-    style: "openai",
-    baseUrl: "https://models.github.ai/inference/chat/completions",
-    key: () => config.githubModelsToken,
-    models: [
-      { id: "openai/gpt-4.1-mini", label: "GPT-4.1 mini — eng sifatli, rasm ham" },
-      { id: "openai/gpt-4o-mini", label: "GPT-4o mini — rasm ham" },
-      { id: "openai/gpt-4o", label: "GPT-4o — kuchli, limit past" },
-      { id: "meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
-    ],
-  },
+  // Cerebras va GitHub Models OLIB TASHLANDI (2026-08-12):
+  //  - GitHub Models 410 "github_models_retirement_brownout" qaytaradi, servis
+  //    yopilmoqda — kalit ham yordam bermaydi.
+  //  - Cerebras kaliti hech qachon o'rnatilmagan edi, egasi kerak emas dedi.
+  // O'lik provayder zanjirda turishi har so'rovni sekinlashtiradi va loglarni
+  // shovqin bilan to'ldiradi.
   {
     id: "mistral",
     label: "Mistral",
@@ -182,20 +164,16 @@ async function fetchResilient(url: string, init: RequestInit): Promise<Response>
 // izohlarni aralashtirib, TITLE:/YEAR:/INFO: formatini buzadi.
 // Groq'da 2026-07 holatiga ko'ra umuman vision modeli yo'q.
 // Tartib SIFAT bo'yicha: kino posterini tanish og'ir vazifa, shuning uchun eng
-// kuchli model birinchi. Rasm so'rovlari kam bo'lgani uchun GitHub Models'ning
-// past kunlik limiti bu yerda muammo emas (matn oqimida esa Groq birinchi
-// turadi — u yerda hajm muhimroq).
-// TARTIB: GitHub Models 410 "retirement brownout" qaytaryapti (servis yopilmoqda),
-// shuning uchun u boshdan OXIRGA ko'chirildi — ilgari zanjirning ikkita birinchi
-// bandi ham o'sha yerda edi va rasm qidiruvi hech qachon ishlamasdi.
+// kuchli model birinchi (matn oqimida esa Groq birinchi — u yerda hajm muhimroq).
+// Ilgari zanjirning IKKITA BIRINCHI bandi GitHub Models edi — u 410 qaytargani
+// uchun rasm orqali qidirish amalda hech qachon ishlamasdi. GitHub olib
+// tashlandi, boshiga Gemini qo'yildi.
 const VISION_MODELS: { provider: ProviderId; model: string }[] = [
   { provider: "gemini", model: "gemini-3.6-flash" },
   { provider: "openrouter", model: "google/gemma-4-26b-a4b-it:free" },
   { provider: "openrouter", model: "nvidia/nemotron-nano-12b-v2-vl:free" },
   { provider: "mistral", model: "pixtral-12b-latest" },
   { provider: "openrouter", model: "openrouter/free" },
-  { provider: "github", model: "openai/gpt-4.1-mini" },
-  { provider: "github", model: "openai/gpt-4o-mini" },
 ];
 
 function parseDataUrl(dataUrl: string): { mime: string; base64: string } | null {
