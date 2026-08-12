@@ -24,16 +24,21 @@ import { botSettingsHandler } from "./botSettings.js";
 // bc:*, ch:*) faqat menyu kirishida emas — har bir so'rovda rad etiladi.
 export const adminHandler = new Composer<MyContext>();
 
+// DIQQAT: filtrlar `adminHandler` USTIGA o'rnatilishi shart. `new Composer()`
+// dan boshlansa, hosil bo'lgan tarmoq adminHandler'ga hech qachon ulanmaydi va
+// butun admin paneli jim o'ladi — bosilgan tugma pastdagi searchHandler'ga
+// tushib, kino nomi sifatida qidiriladi (2026-08-09 da prodda shu bo'ldi).
+
 /** Berilgan section ruxsatiga ega adminlar uchun filter. */
 function section(sectionName: string): Composer<MyContext> {
-  return new Composer<MyContext>().filter(
+  return adminHandler.filter(
     (ctx) => isAdmin(ctx.from?.id) && adminCan(ctx.from!.id, sectionName)
   );
 }
 
 /** Faqat owner (ADMIN_IDS) — boshqa adminlar kira olmaydi. */
 function ownerOnly(): Composer<MyContext> {
-  return new Composer<MyContext>().filter((ctx) => isOwner(ctx.from?.id));
+  return adminHandler.filter((ctx) => isOwner(ctx.from?.id));
 }
 
 // Conversation'lar — kirish nuqtasi movies/serials bo'limlarida, shuning
@@ -64,7 +69,7 @@ ownerOnly().use(adminsHandler);
 // botSettings.ts ning o'z guard'i ham ularni qabul qiladi — mount shunga mos
 // bo'lmasa, cheklangan adminlar tugmani ko'rib, bosganda hech narsa bo'lmasdi.
 function botSettingsScope(): Composer<MyContext> {
-  return new Composer<MyContext>().filter(
+  return adminHandler.filter(
     (ctx) =>
       isAdmin(ctx.from?.id) &&
       (isOwner(ctx.from!.id) ||

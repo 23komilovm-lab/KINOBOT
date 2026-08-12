@@ -14,17 +14,25 @@ echo "=== Prisma migrations ==="
 if node --input-type=commonjs -e "
   const { PrismaClient } = require('@prisma/client');
   const p = new PrismaClient();
-  p.\$queryRawUnsafe(\"SELECT to_regclass('users') AS t\")
+  p.\$queryRawUnsafe(\"SELECT to_regclass('users')::text AS t\")
     .then((r) => process.exit(r && r[0] && r[0].t ? 0 : 1))
-    .catch(() => process.exit(1));
+    .catch((e) => { console.error('Baza tekshiruvi xatosi:', e.message); process.exit(2); });
 "; then
   echo "Baza allaqachon jadvallar bilan mavjud — init baseline 'applied' deb belgilanadi."
-  npx prisma migrate resolve --applied 20260807000000_init 2>/dev/null || true
+  npx prisma migrate resolve --applied 20260807000000_init || true
 else
+  # Faqat 1 = jadval yo'q (haqiqatan bo'sh baza). 2 = tekshiruvning o'zi yiqildi —
+  # bunday holatda "bo'sh baza" deb faraz qilish MAVJUD bazada init'ni ishga tushirib
+  # "already exists" bilan buzadi, shuning uchun to'xtaymiz.
+  rc=$?
+  if [ "$rc" != "1" ]; then
+    echo "Baza holatini aniqlab bo'lmadi (exit $rc) — migration ishga tushirilmaydi."
+    exit 1
+  fi
   echo "Yangi/bo'sh baza — init migration oddiy tarzda qo'llanadi."
 fi
 
-npx prisma migrate deploy --skip-generate
+npx prisma migrate deploy
 
 echo "=== Bot ishga tushmoqda ==="
 exec node dist/index.js

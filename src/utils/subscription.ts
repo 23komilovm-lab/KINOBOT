@@ -1,6 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import { prisma } from "../prisma.js";
 import { getBool, getSetting, KEYS } from "./settings.js";
+import { ATTRIB_WINDOW_MS, recordChannelJoin } from "./channelEvents.js";
 import type { MyContext } from "../types.js";
 import type { Channel } from "@prisma/client";
 
@@ -135,25 +136,26 @@ export async function getUnsubscribedChannels(
   return results.filter((r) => !r.isSubscribed).map((r) => r.channel);
 }
 
-/** Bot obuna tugmasi bosilganda — sessionga kanalni eslab qolamiz (source="bot" uchun) */
-export function markPendingSubscription(channelId: bigint): void {
-  // Bu funksiya callback handlerda chaqiriladi, ctx sessiondan foydalanadi
-}
-
-/** Obuna tasdiqlanganda (sub:check) — ChannelEvent yozamiz */
-export async function recordSubscriptionJoin(ctx: MyContext, userId: number, channelId: bigint): Promise<void> {
-  try {
-    await prisma.channelEvent.create({
-      data: {
-        channelId,
-        userId: BigInt(userId),
-        type: "join",
-        source: "bot",
-      },
-    });
-  } catch {
-    // xatolik yuz berganda stats buzmasin
-  }
+/**
+ * Obuna tasdiqlanganda (sub:check) — qo'shilishni "bot orqali" deb belgilaydi.
+ *
+ * DIQQAT: yangi yozuv YARATILMAYDI. `chat_member` handleri o'sha qo'shilish uchun
+ * allaqachon ChannelEvent yozgan — yana bittasini qo'shsak, har bir odam ikki
+ * marta sanaladi. Shuning uchun oxirgi yozuvning manbasi yangilanadi.
+ *
+ * Telegram `invite_link` ni har doim ham yubormaydi (masalan ochiq kanalga
+ * username orqali kirilsa), shuning uchun bu yo'l ishonchliroq: foydalanuvchi
+ * bot darvozasidan o'tib, aynan shu kanalga endigina a'zo bo'ldi.
+ */
+export async function recordSubscriptionJoin(
+  _ctx: MyContext,
+  userId: number,
+  channelId: bigint
+): Promise<void> {
+  // Serializatsiya va dublikat-himoyasi recordChannelJoin'da (snapshot upsert —
+  // chat_member va sub:check parallel kelsa ham bitta yozuv). Bot darvozasi
+  // tasdiqlagani uchun source = "bot".
+  await recordChannelJoin(channelId, userId, "bot");
 }
 
 async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeyboard> {
@@ -165,9 +167,12 @@ async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeybo
     const url = channelUrl(ch);
     if (!url) continue;
     const label = ch.buttonLabel?.trim() || (ch.type === "INSTAGRAM" ? `📸 ${ch.title}` : defLabel);
-    // Callback tugma: bosilganda sessionga pendingSubscriptionChannel yozamiz,
-    // keyin answerCallbackQuery(url=...) orqali kanalga yo'naltiramiz.
-    kb.text(label, `sub:join:${ch.chatId}`).row();
+    // To'g'ridan-to'g'ri URL tugma. Callback + answerCallbackQuery(url=...) ISHLAMAYDI:
+    // Telegram u parametrda faqat o'yin havolasi yoki t.me/<bot>?start=... qabul qiladi,
+    // kanal havolasi `URL_INVALID` beradi (2026-08-09 da prodda aynan shu yuz berdi).
+    // Atributsiya baribir ishlaydi — channelUrl() birinchi navbatda botInviteLink ni
+    // qaytaradi, kimligi chat_member yangilanishida invite_link orqali bilinadi.
+    kb.url(label, url).row();
   }
 
   const hasTg = channels.some((c) => c.type !== "INSTAGRAM");
@@ -202,14 +207,34 @@ const SUB_PROMPT_TEXT =
   `<i>Yoki majburiy obunaga hojat qoldirmasdan, cheksiz foydalanish uchun — Premium obuna oling. 👇</i>`;
 
 /** Obuna so'rovi xabarini yuboradi */
+/**
+ * Darvoza ko'rsatilgan paytda qaysi kanallar bloklayotganini sessiyaga yozamiz.
+ * `sub:check` muvaffaqiyatli o'tganda shu ro'yxat "bot orqali qo'shilgan" deb
+ * belgilanadi — URL tugma callback bermagani uchun boshqa ishonchli belgi yo'q.
+ */
+function rememberBlockingChannels(ctx: MyContext, channels: Channel[]): void {
+  const ids = channels.filter((c) => c.type !== "INSTAGRAM").map((c) => c.chatId.toString());
+  if (ids.length === 0) return;
+  ctx.session.scratch = {
+    ...(ctx.session.scratch ?? {}),
+    pendingSubChannels: ids,
+    // Yangilik shtampi: faqat oxirgi 30 daqiqada ko'rsatilgan darvoza atributsiya
+    // qiladi. Eskirib qolgan sessiya (foydalanuvchi darvozani korib, organik
+    // qo'shilgan) soxta "bot" yozuvini yaratmasin.
+    pendingSubAt: Date.now(),
+  };
+}
+
 export async function sendSubscriptionPrompt(ctx: MyContext, channels: Channel[]): Promise<void> {
   const kb = await buildSubscriptionMarkup(channels);
+  rememberBlockingChannels(ctx, channels);
   await ctx.reply(SUB_PROMPT_TEXT, { reply_markup: kb });
 }
 
 /** Obuna so'rovi xabarini joriy (masalan, premium taklifidan qaytilgan) xabar ustiga tahrirlaydi */
 export async function editSubscriptionPrompt(ctx: MyContext, channels: Channel[]): Promise<void> {
   const kb = await buildSubscriptionMarkup(channels);
+  rememberBlockingChannels(ctx, channels);
   await ctx.editMessageText(SUB_PROMPT_TEXT, { reply_markup: kb }).catch(async () => {
     await ctx.reply(SUB_PROMPT_TEXT, { reply_markup: kb });
   });
@@ -229,7 +254,40 @@ export async function ensureSubscribed(ctx: MyContext, userId: number): Promise<
   const notJoined = await getUnsubscribedChannels(ctx, userId);
   // Instagram kanallarini obunasiz ham o'tkazib yuboramiz (tekshirish imkonsiz)
   const blocking = notJoined.filter((c) => c.type !== "INSTAGRAM");
-  if (blocking.length === 0) return true;
+  if (blocking.length === 0) {
+    // Darvoza ilgari ko'rsatilgan bo'lsa va endi hamma kanalga a'zo bo'lsa —
+    // bu odam bot orqali qo'shilgan. "Tekshirish" tugmasini bosmasdan to'g'ridan
+    // kino kodi yuborganlar ham shu yerda hisobga olinadi (aks holda ular
+    // `direct` bo'lib qolib, referal statistikasi kam ko'rsatardi).
+    await attributePendingSubscriptions(ctx, userId);
+    return true;
+  }
   await sendSubscriptionPrompt(ctx, notJoined);
   return false;
+}
+
+/**
+ * Sessiyada saqlangan "darvoza bloklagan kanallar" ro'yxatini `bot` deb
+ * belgilaydi va ro'yxatni tozalaydi. Bir necha marta chaqirilishi xavfsiz —
+ * `recordSubscriptionJoin` mavjud yozuvni yangilaydi, yangisini yaratmaydi.
+ */
+export async function attributePendingSubscriptions(
+  ctx: MyContext,
+  userId: number
+): Promise<void> {
+  const v = ctx.session?.scratch;
+  const pending = v?.pendingSubChannels as string[] | undefined;
+  if (!Array.isArray(pending) || pending.length === 0) return;
+
+  const at = v?.pendingSubAt as number | undefined;
+  const fresh = typeof at === "number" && Date.now() - at <= ATTRIB_WINDOW_MS;
+  if (fresh) {
+    for (const idStr of pending) {
+      await recordSubscriptionJoin(ctx, userId, BigInt(idStr));
+    }
+  }
+  // Ro'yxat qanday bo'lmasin tozalanadi — eskirgan darvoza keyingi chaqiruvda
+  // soxta atributsiya (organik qo'shilishni "bot" deb belgilash) qilmasin.
+  delete v!.pendingSubChannels;
+  delete v!.pendingSubAt;
 }

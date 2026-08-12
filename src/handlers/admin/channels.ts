@@ -13,9 +13,15 @@ import {
 } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { buttonStyleLabel, resolveButtonStyle, isValidUrl } from "../../utils/contentButton.js";
-import { todayUz, dayStartUz } from "../../utils/dateRange.js";
+import { daysAgoStartUz } from "../../utils/dateRange.js";
+import {
+  countDistinctBotJoins,
+  countDistinctJoinsBySource,
+  currentBotMembers,
+} from "../../utils/channelStats.js";
+import { getCachedMemberCount, clearMemberCount } from "../../services/memberCountCache.js";
 import type { MyContext } from "../../types.js";
-import type { ChannelType } from "@prisma/client";
+import type { Channel, ChannelType } from "@prisma/client";
 
 export const channelsHandler = new Composer<MyContext>();
 
@@ -198,6 +204,73 @@ async function renderChannelList(ctx: MyContext) {
 }
 
 // ============ KANAL DETALI + STATISTIKA ============
+
+/** Statistika qiymatlari — panel matnini DB/Telegram'siz test qilish uchun. */
+export interface ChannelStatsData {
+  botToday: number;
+  botWeek: number;
+  botMonth: number;
+  botTotal: number;
+  currentBot: number;
+  memberCount: number | null;
+  reqPending: number;
+  source: { bot: number; link: number; request: number; folder: number; unknown: number };
+}
+
+/**
+ * Manba kesimini (Map) panel uchun tayyor obyektga aylantiradi.
+ * `direct` va `unknown` ikkalasi ham "Telegram/tegishli manba bermagan" degani —
+ * adashtirmaslik uchun bitta "Noma'lum" bucket'ga birlashtiriladi (faqat ko'rsatish,
+ * saqlangan ma'lumot o'zgarmaydi). Sof funksiya — test qilish oson.
+ */
+export function mergeSourceBuckets(sourceMap: ReadonlyMap<string, number>): ChannelStatsData["source"] {
+  const out: ChannelStatsData["source"] = { bot: 0, link: 0, request: 0, folder: 0, unknown: 0 };
+  for (const [k, v] of sourceMap) {
+    if (k === "direct" || k === "unknown") out.unknown += v;
+    else if (k === "bot" || k === "link" || k === "request" || k === "folder") out[k] += v;
+  }
+  return out;
+}
+
+/** Panel matnini sof quruvchi. Alohida export — vitest'da Telegram/DB siz test qilish mumkin. */
+export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string {
+  const handle = c.username ? `@${c.username}` : (c.inviteLink ?? "(havola yo'q)");
+  const header =
+    `<tg-emoji emoji-id="${BE.channel}">📢</tg-emoji> <b>${e.escapeHtml(c.title)}</b>\n` +
+    `Tur: <b>${TYPE_LABEL[c.type]}</b>\n` +
+    `<code>${e.escapeHtml(handle)}</code>\n` +
+    `Majburiy obuna: <b>${c.isActive ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>`;
+
+  // Instagram/boshqa — a'zolik API orqali tekshirilmaydi (sintetik salbiy chatId
+  // uchun chat_member hech qachon kelmaydi) → ma'nosiz "0" statistika emas.
+  if (c.type === "INSTAGRAM") {
+    return `${header}\n\n<b>📊 Statistikalar:</b> —`;
+  }
+
+  const reqLine =
+    c.type === "REQUEST" && s.reqPending > 0
+      ? `\n⏳ Kutilayotgan so'rovlar: <b>${s.reqPending}</b>`
+      : "";
+
+  return (
+    `${header}\n\n` +
+    `<b>📊 Bot orqali qo'shilgan yagona odamlar:</b>\n` +
+    `  Bugun: <b>${s.botToday}</b> · 7 kun: <b>${s.botWeek}</b> · ` +
+    `30 kun: <b>${s.botMonth}</b> · Jami: <b>${s.botTotal}</b>\n` +
+    `👥 Hozirgi a'zolar (Telegram): <b>${s.memberCount ?? "—"}</b>\n` +
+    `🤖 Bot orqali, hozir a'zoda: <b>${s.currentBot}</b>` +
+    reqLine +
+    `\n\n🧭 <b>Manba (jami, yagona):</b>\n` +
+    `  🤖 Bot: <b>${s.source.bot}</b>\n` +
+    `  🔗 Havola: <b>${s.source.link}</b>\n` +
+    `  📋 So'rov: <b>${s.source.request}</b>\n` +
+    `  📁 Papka: <b>${s.source.folder}</b>\n` +
+    `  ❔ Noma'lum: <b>${s.source.unknown}</b>\n` +
+    `<i>"Noma'lum" — eski yozuvlar yoki Telegram manba bermagan holat. ` +
+    `Kuzatuvdan oldingi qo'shilishlar ham shu yerga kiradi.</i>`
+  );
+}
+
 async function renderChannelDetail(ctx: MyContext, id: number) {
   const c = await prisma.channel.findUnique({ where: { id } });
   if (!c) {
@@ -205,69 +278,54 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
     return;
   }
 
-  const now = new Date();
-  // "Bugun" — Toshkent kuni (UTC+5), server-lokal tun chegarasi emas (joinStats bilan mos)
-  const [y, m, d] = todayUz().split("-").map(Number);
-  const today = dayStartUz({ y, m, d });
-  const week = new Date(now);
-  week.setDate(week.getDate() - 7);
-  const month = new Date(now);
-  month.setDate(month.getDate() - 30);
+  // INSTAGRAM: statistika umuman hisoblanmaydi (ma'nosiz "0" ko'rinmasin).
+  let statsData: ChannelStatsData = {
+    botToday: 0,
+    botWeek: 0,
+    botMonth: 0,
+    botTotal: 0,
+    currentBot: 0,
+    memberCount: null,
+    reqPending: 0,
+    source: { bot: 0, link: 0, request: 0, folder: 0, unknown: 0 },
+  };
 
-  const [joinToday, joinWeek, joinMonth, joinTotal] = await Promise.all([
-    prisma.channelEvent.count({
-      where: { channelId: c.chatId, type: "join", date: { gte: today } },
-    }),
-    prisma.channelEvent.count({
-      where: { channelId: c.chatId, type: "join", date: { gte: week } },
-    }),
-    prisma.channelEvent.count({
-      where: { channelId: c.chatId, type: "join", date: { gte: month } },
-    }),
-    prisma.channelEvent.count({ where: { channelId: c.chatId, type: "join" } }),
-  ]);
-
-  // Umumiy a'zo soni (Telegram)
-  let memberCount = "—";
   if (c.type !== "INSTAGRAM") {
-    const cnt = await ctx.api.getChatMemberCount(Number(c.chatId)).catch(() => null);
-    if (cnt !== null) memberCount = String(cnt);
+    // Barcha oynalar Toshkent vaqti (UTC+5), kalendar kunlar:
+    // Bugun = shu kun 00:00, 7 kun = bugun bilan 7 kun (6 kun oldin), 30 kun = 29 kun oldin.
+    const today = daysAgoStartUz(0);
+    const week = daysAgoStartUz(6);
+    const month = daysAgoStartUz(29);
+
+    const [botToday, botWeek, botMonth, botTotal, currentBot, memberCount, sourceMap, reqPending] =
+      await Promise.all([
+        countDistinctBotJoins(c.chatId, { gte: today }),
+        countDistinctBotJoins(c.chatId, { gte: week }),
+        countDistinctBotJoins(c.chatId, { gte: month }),
+        countDistinctBotJoins(c.chatId, null),
+        currentBotMembers(c.chatId),
+        getCachedMemberCount(ctx.api, c.chatId),
+        countDistinctJoinsBySource(c.chatId, null),
+        c.type === "REQUEST"
+          ? prisma.joinRequest.count({ where: { channelId: c.chatId, status: "pending" } })
+          : Promise.resolve(0),
+      ]);
+
+    // `direct` va `unknown` — ikkalasi ham "Telegram/tegishli manba bermagan" degani.
+    // Adashtirmaslik uchun bitta "Noma'lum" bucket'ga birlashtiriladi (faqat ko'rsatish).
+    statsData = {
+      botToday,
+      botWeek,
+      botMonth,
+      botTotal,
+      currentBot,
+      memberCount,
+      reqPending,
+      source: mergeSourceBuckets(sourceMap),
+    };
   }
 
-  const handle = c.username ? `@${c.username}` : (c.inviteLink ?? "(havola yo'q)");
-
-  let reqLine = "";
-  if (c.type === "REQUEST") {
-    const pending = await prisma.joinRequest.count({
-      where: { channelId: c.chatId, status: "pending" },
-    });
-    reqLine = `\n⏳ Kutilayotgan so'rovlar: <b>${pending}</b>`;
-  }
-
-  // Bot tracking havola statistikasi (ChannelEvent orqali)
-  let inviteStatsLine = "";
-  if (c.type !== "INSTAGRAM" && c.botInviteLink) {
-    const botJoins = await prisma.channelEvent.count({
-      where: { channelId: c.chatId, type: "join", source: "bot" },
-    });
-    if (botJoins > 0) {
-      inviteStatsLine = `\n🔗 Bot orqali qo'shilgan: <b>${botJoins}</b> ta`;
-    }
-  }
-
-  const text =
-    `<tg-emoji emoji-id="${BE.channel}">📢</tg-emoji> <b>${e.escapeHtml(c.title)}</b>\n` +
-    `Tur: <b>${TYPE_LABEL[c.type]}</b>\n` +
-    `<code>${e.escapeHtml(handle)}</code>\n` +
-    `Majburiy obuna: <b>${c.isActive ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>\n\n` +
-    `<b>📊 Qo'shilish statistikasi:</b>\n` +
-    `Bugun: <b>${joinToday}</b>\n` +
-    `1 hafta: <b>${joinWeek}</b>\n` +
-    `1 oy: <b>${joinMonth}</b>\n` +
-    `Jami (kuzatilgan): <b>${joinTotal}</b>\n` +
-    `Umumiy a'zolar: <b>${memberCount}</b>` +
-    reqLine +
-    inviteStatsLine;
+  const text = buildChannelStatsPanel(c, statsData);
 
   const rows: ReturnType<typeof ibtn>[][] = [
     [
@@ -279,6 +337,9 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
     ],
     [ibtn("✏️ Yorliqni tahrirlash", `ch:editlabel:${c.id}`, "primary")],
   ];
+  if (c.type !== "INSTAGRAM") {
+    rows.push([ibtn("🔄 Yangilash", `ch:refresh:${c.id}`, "primary")]);
+  }
   if (c.type === "REQUEST") {
     rows.push([ibtn("📋 So'rovlarni boshqarish", "ch:jrstats", "primary")]);
   }
@@ -291,6 +352,16 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
 channelsHandler.callbackQuery(/^ch:view:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   await renderChannelDetail(ctx, Number(ctx.match[1]));
+});
+
+channelsHandler.callbackQuery(/^ch:refresh:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "🔄 Yangilanmoqda..." });
+  const id = Number(ctx.match[1]);
+  const c = await prisma.channel.findUnique({ where: { id }, select: { chatId: true } });
+  if (!c) return;
+  // A'zo-soni keshi bypass — Telegram'dan yangi qiymat olinadi.
+  clearMemberCount(c.chatId);
+  await renderChannelDetail(ctx, id);
 });
 
 // Har bir kanal uchun alohida majburiy obuna toggle (popup bilan)
@@ -928,7 +999,10 @@ channelsHandler.callbackQuery("ch:del", async (ctx) => {
 channelsHandler.callbackQuery(/^ch:delconf:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   try {
+    const ch = await prisma.channel.findUnique({ where: { id }, select: { chatId: true } });
     await prisma.channel.delete({ where: { id } });
+    // O'chirilgan kanalning a'zo-soni keshida eski qiymat qolib ketmasin.
+    if (ch) clearMemberCount(ch.chatId);
     await ctx.answerCallbackQuery({ text: "✅ O'chirildi", show_alert: true });
     await renderChannelList(ctx);
   } catch (err) {

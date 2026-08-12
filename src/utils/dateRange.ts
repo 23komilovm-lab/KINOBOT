@@ -62,6 +62,19 @@ export function formatUzDateTime(d: Date): string {
   return `${p(uz.getUTCDate())}.${p(uz.getUTCMonth() + 1)}.${uz.getUTCFullYear()} ${p(uz.getUTCHours())}:${p(uz.getUTCMinutes())}`;
 }
 
+/** Bugundan n kun oldingi kunning boshlanishi (Toshkent 00:00) — UTC instant.
+ *  Kalendar-kun semantikasi: 7 kun = bugun bilan birga 7 ta kun = daysAgoStartUz(6). */
+export function daysAgoStartUz(n: number): Date {
+  const [y, m, d] = todayUz().split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d) - UZ_OFFSET_MS - n * 86_400_000);
+}
+
+/** Joriy oyning 1-kuni boshlanishi (Toshkent 00:00) — UTC instant */
+export function monthStartUz(): Date {
+  const [y, m] = todayUz().split("-").map(Number);
+  return dayStartUz({ y, m, d: 1 });
+}
+
 /** Hozirgi lahzani Toshkent vaqti bo'yicha "YYYY-MM-DD" kun kaliti sifatida qaytaradi (kunlik limitlar uchun) */
 export function todayUz(): string {
   const uz = new Date(Date.now() + UZ_OFFSET_MS);

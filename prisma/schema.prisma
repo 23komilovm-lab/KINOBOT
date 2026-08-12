@@ -206,7 +206,8 @@ model Channel {
   buttonLabel String?     // Obuna sahifasida ko'rsatiladigan maxsus yorliq
   createdAt   DateTime    @default(now())
 
-  joinRequests JoinRequest[]
+  joinRequests   JoinRequest[]
+  channelMembers ChannelMember[]
 
   @@map("channels")
 }
@@ -242,6 +243,27 @@ model ChannelEvent {
   @@index([date])
   @@index([channelId, source]) // bot/organic statistika uchun
   @@map("channel_events")
+}
+
+// ===================== KANAL A'ZOLIGI SNAPSHOTI (joriy holat) =====================
+// channel_events — to'liq voqealar jurnali (append-only). Bu jadval esa har bir
+// (kanal, foydalanuvchi) uchun JORIY a'zolik faktini saqlaydi:
+//  · bitta qator, @@unique — dublikat qo'shilishni yuqotuvchi serializatsiya nuqtasi
+//  · source "bot" dan pastga TUSHIRILMAYDI (bir marta bot = doim bot)
+//  · leftAt NULL = hozir a'zo (chiqishda yoziladi)
+model ChannelMember {
+  id        Int      @id @default(autoincrement())
+  channelId BigInt
+  userId    BigInt
+  joinedAt  DateTime @default(now())
+  source    String   @default("unknown")
+  leftAt    DateTime?
+
+  channel Channel @relation(fields: [channelId], references: [chatId], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId, source, joinedAt])
+  @@map("channel_members")
 }
 
 // ===================== MANBA KANALLAR (avto-indekslash) =====================

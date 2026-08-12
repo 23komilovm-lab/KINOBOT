@@ -3,6 +3,7 @@ import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
 import { ibtn, BE, kb, cancelKeyboard } from "../../utils/keyboard.js";
 import { todayUz, dayStartUz } from "../../utils/dateRange.js";
+import { countDistinctBotJoins } from "../../utils/channelStats.js";
 import type { MyContext } from "../../types.js";
 
 export const joinStatsHandler = new Composer<MyContext>();
@@ -64,14 +65,14 @@ async function renderStats(ctx: MyContext, edit = true, messageId?: number) {
       prisma.joinRequest.count({ where: { channelId: cid, status: "pending" } }),
     ]);
 
-    // Bot tracking havolasi statistikasi (ChannelEvent orqali)
+    // Bot tracking havolasi statistikasi (ChannelEvent orqali) —
+    // YAGONA odamlar (COUNT DISTINCT), oddiy count emas: takror-qo'shilish
+    // yozuvlari ham bitta odam deb sanalishi kerak.
     let botTrackingLine = "";
     if (ch.botInviteLink) {
-      const botJoins = await prisma.channelEvent.count({
-        where: { channelId: cid, type: "join", source: "bot" },
-      });
+      const botJoins = await countDistinctBotJoins(cid, null);
       if (botJoins > 0) {
-        botTrackingLine = `\n  🔗 Bot orqali: <b>${botJoins}</b> qo'shilgan`;
+        botTrackingLine = `\n  🔗 Bot orqali (yagona): <b>${botJoins}</b> qo'shilgan`;
       }
     }
 

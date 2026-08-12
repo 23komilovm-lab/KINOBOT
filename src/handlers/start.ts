@@ -2,7 +2,11 @@ import { Composer } from "grammy";
 import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { adminMenuKeyboard, kb } from "../utils/keyboard.js";
-import { getUnsubscribedChannels, recordSubscriptionJoin } from "../utils/subscription.js";
+import {
+  getUnsubscribedChannels,
+  recordSubscriptionJoin,
+  attributePendingSubscriptions,
+} from "../utils/subscription.js";
 import { attachReferrer } from "../utils/referral.js";
 import { sendReferralInfo } from "./referral.js";
 import { weightedRandomMovie } from "../services/recommend.js";
@@ -104,7 +108,6 @@ startHandler.command("start", async (ctx) => {
 // Obuna tugmasi bosilganda — sessionga kanalni eslab qolamiz, keyin kanalga yo'naltiramiz
 startHandler.callbackQuery(/^sub:join:(-?\d+)$/, async (ctx) => {
   const channelId = BigInt(ctx.match[1]);
-  const uid = ctx.from.id;
 
   // Sessionga "bot orqali" eslab qolamiz
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pendingSubscriptionChannel: channelId.toString() };
@@ -120,8 +123,12 @@ startHandler.callbackQuery(/^sub:join:(-?\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "Kanal havolasi topilmadi.", show_alert: true });
     return;
   }
-  // answerCallbackQuery url parametri — foydalanuvchini to'g'ridan-to'g'ri kanalga yo'naltiradi
-  await ctx.answerCallbackQuery({ url });
+  // DIQQAT: answerCallbackQuery({ url }) bu yerda ISHLAMAYDI — Telegram u parametrda
+  // faqat o'yin havolasi yoki t.me/<bot>?start=... qabul qiladi, kanal havolasi
+  // `URL_INVALID` beradi. Tugmalar endi to'g'ridan-to'g'ri URL tugma (subscription.ts),
+  // bu handler faqat eski xabarlardagi qolgan callback tugmalar uchun — havolani
+  // popup'da ko'rsatamiz.
+  await ctx.answerCallbackQuery({ text: `Kanalga o'tish: ${url}`, show_alert: true });
 });
 
 // Obuna tekshirish — yangi xabar YUBORILMAYDI, faqat popup
@@ -137,11 +144,13 @@ startHandler.callbackQuery("sub:check", async (ctx) => {
     await ctx.answerCallbackQuery({ text: "✅ Rahmat! A'zolik tasdiqlandi." });
     await ctx.deleteMessage().catch(() => {});
 
-    // Sessionda "bot orqali" belgilangan kanal bo'lsa — ChannelEvent yozamiz
-    const pendingChStr = ctx.session.scratch?.pendingSubscriptionChannel as string | undefined;
-    if (pendingChStr) {
-      const channelId = BigInt(pendingChStr);
-      await recordSubscriptionJoin(ctx, uid, channelId);
+    // Darvoza ko'rsatilganda bloklab turgan kanallar — endi hammasiga a'zo.
+    // Demak bu odamlar aynan bot orqali qo'shilgan, shunday belgilaymiz.
+    await attributePendingSubscriptions(ctx, uid);
+    // Eski sessiyalarda qolgan bitta kanalli belgini ham qo'llab-quvvatlaymiz
+    const legacyCh = ctx.session.scratch?.pendingSubscriptionChannel as string | undefined;
+    if (legacyCh) {
+      await recordSubscriptionJoin(ctx, uid, BigInt(legacyCh));
       if (ctx.session.scratch) delete ctx.session.scratch.pendingSubscriptionChannel;
     }
 
