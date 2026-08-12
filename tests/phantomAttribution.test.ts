@@ -17,7 +17,10 @@ vi.mock("../src/utils/channelEvents.js", () => ({
   recordChannelJoin,
 }));
 
-import { attributePendingSubscriptions } from "../src/utils/subscription.js";
+import {
+  attributePendingSubscriptions,
+  rememberBlockingChannels,
+} from "../src/utils/subscription.js";
 import type { MyContext } from "../src/types.js";
 
 const T0 = new Date("2026-08-12T10:00:00.000Z");
@@ -71,5 +74,27 @@ describe("attributePendingSubscriptions", () => {
     await attributePendingSubscriptions(ctx, 999);
 
     expect(recordChannelJoin).toHaveBeenCalledTimes(1);
+  });
+});
+describe("rememberBlockingChannels — so'rovli kanal ro'yxatga KIRMAYDI", () => {
+  const chan = (chatId: bigint, type: string) => ({ chatId, type }) as never;
+
+  it("REQUEST va INSTAGRAM tashlab ketiladi, qolganlari eslab qolinadi", () => {
+    // So'rovli kanalda darvoza pending zayifkani "obuna" deb qabul qiladi, lekin
+    // odam guruhga KIRMAGAN — uni "qo'shilgan" deb yozish sonni soxtalashtiradi.
+    const ctx = ctxWith({});
+    rememberBlockingChannels(ctx, [
+      chan(111n, "PUBLIC"),
+      chan(222n, "REQUEST"),
+      chan(333n, "INSTAGRAM"),
+      chan(444n, "PRIVATE"),
+    ]);
+    expect(ctx.session.scratch?.pendingSubChannels).toEqual(["111", "444"]);
+  });
+
+  it("faqat so'rovli kanal bo'lsa — sessiyaga umuman yozilmaydi", () => {
+    const ctx = ctxWith({});
+    rememberBlockingChannels(ctx, [chan(222n, "REQUEST")]);
+    expect(ctx.session.scratch?.pendingSubChannels).toBeUndefined();
   });
 });

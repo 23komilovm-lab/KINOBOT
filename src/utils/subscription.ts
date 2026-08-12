@@ -211,9 +211,19 @@ const SUB_PROMPT_TEXT =
  * Darvoza ko'rsatilgan paytda qaysi kanallar bloklayotganini sessiyaga yozamiz.
  * `sub:check` muvaffaqiyatli o'tganda shu ro'yxat "bot orqali qo'shilgan" deb
  * belgilanadi — URL tugma callback bermagani uchun boshqa ishonchli belgi yo'q.
+ *
+ * SO'ROVLI KANAL BU RO'YXATGA KIRMAYDI. Darvoza u yerda `pending` zayifkani
+ * "obuna" deb qabul qiladi (ataylab — odam navbatda turib ham kontentga o'tadi),
+ * lekin odam guruhga HALI KIRMAGAN. Uni "qo'shilgan" deb yozish statistikani
+ * soxtalashtiradi: 2026-08-12 da Guruh 2k da odam zayifka yuborganidan 11
+ * soniya keyin "a'zo" bo'lib yozilgan, zayifkasi esa hamon pending edi.
+ * So'rovli kanalda haqiqiy qo'shilish faqat `chat_member` orqali biliniladi
+ * (siz tasdiqlaganingizdan keyin), asosiy metrika esa — zayifka soni.
  */
-function rememberBlockingChannels(ctx: MyContext, channels: Channel[]): void {
-  const ids = channels.filter((c) => c.type !== "INSTAGRAM").map((c) => c.chatId.toString());
+export function rememberBlockingChannels(ctx: MyContext, channels: Channel[]): void {
+  const ids = channels
+    .filter((c) => c.type !== "INSTAGRAM" && c.type !== "REQUEST")
+    .map((c) => c.chatId.toString());
   if (ids.length === 0) return;
   ctx.session.scratch = {
     ...(ctx.session.scratch ?? {}),
