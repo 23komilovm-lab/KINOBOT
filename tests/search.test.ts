@@ -65,6 +65,19 @@ describe("searchContent — 3 bosqichli fallback", () => {
     expect(prisma.$queryRaw).toHaveBeenCalled();
     expect(res).toHaveLength(1);
     expect(res[0]).toMatchObject({ kind: "movie", id: 7, code: 700 });
+
+    // REGRESSIYA (prodda "column titlenorm does not exist" bergan):
+    //  1. camelCase ustun qo'shtirnoqda bo'lishi shart — aks holda Postgres uni
+    //     kichik harfga tushiradi va topa olmaydi.
+    //  2. UNION'dan keyin ORDER BY ifoda qabul qilmaydi, faqat chiquvchi ustun —
+    //     saralash ichki so'rovdagi `sim` ustuni bo'yicha bo'lishi kerak.
+    const [strings] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [
+      TemplateStringsArray,
+    ];
+    const sql = strings.join("?");
+    expect(sql).toContain('"titleNorm"');
+    expect(sql).not.toMatch(/[^"]titleNorm[^"]/);
+    expect(sql).toMatch(/ORDER BY\s+sim DESC/);
   });
 
   it("ikki bosqich natijalarini takrorsiz birlashtiradi", async () => {

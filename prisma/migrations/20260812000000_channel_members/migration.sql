@@ -35,6 +35,12 @@ SELECT
        AND le."type" = 'leave' AND le."date" > je."date")
 FROM "channel_events" je
 WHERE je."type" = 'join'
+  -- FAQAT hozir mavjud kanallar. `channel_events` da FK yo'q, shuning uchun
+  -- paneldan o'chirilgan kanallarning yozuvlari bazada qolib ketgan (prodda
+  -- 47399 yozuvdan 42936 tasi 13 ta o'chirilgan kanalniki edi). Ularni
+  -- qo'shishga urinish FK'ni buzadi va butun migratsiyani yiqitadi
+  -- (xato 23503 — 2026-08-12 da aynan shu bo'ldi).
+  AND EXISTS (SELECT 1 FROM "channels" c WHERE c."chatId" = je."channelId")
   AND NOT EXISTS (SELECT 1 FROM "channel_events" je2
       WHERE je2."channelId" = je."channelId" AND je2."userId" = je."userId"
         AND je2."type" = 'join'

@@ -69,17 +69,31 @@ async function findBoth(filter: TitleFilter, take: number): Promise<SearchHit[]>
   ];
 }
 
-/** pg_trgm similarity orqali fuzzy qidiruv. Indeks `lower(titleNorm) gin_trgm_ops` — shuning uchun lower() ishlatiladi. */
+/**
+ * pg_trgm similarity orqali fuzzy qidiruv.
+ * Indeks `lower("titleNorm") gin_trgm_ops` — shuning uchun lower() ishlatiladi.
+ *
+ * Ikki tuzoq (2026-08-12 da prodda "column titlenorm does not exist" bergan):
+ *  1. `titleNorm` QO'SHTIRNOQDA bo'lishi shart. Prisma ustunni camelCase qilib
+ *     yaratgan, qo'shtirnoqsiz Postgres uni `titlenorm` ga tushiradi va topa olmaydi.
+ *  2. ORDER BY UNION natijasining USTIDA turishi kerak: UNION'dan keyin
+ *     ORDER BY faqat chiquvchi ustun nomini qabul qiladi, ifodani emas —
+ *     shuning uchun `sim` ichki so'rovda hisoblanib, tashqarida saralanadi.
+ */
 async function findSimilar(term: string, take: number): Promise<SearchHit[]> {
   const rows = await prisma.$queryRaw<
     { kind: string; id: bigint; code: bigint; title: string; views: bigint }[]
   >`
-    SELECT 'movie' AS kind, id, code, title, views FROM movies
-    WHERE lower(titleNorm) % lower(${term})
-    UNION ALL
-    SELECT 'serial' AS kind, id, code, title, views FROM serials
-    WHERE lower(titleNorm) % lower(${term})
-    ORDER BY similarity(lower(titleNorm), lower(${term})) DESC
+    SELECT kind, id, code, title, views FROM (
+      SELECT 'movie' AS kind, id, code, title, views,
+             similarity(lower("titleNorm"), lower(${term})) AS sim
+      FROM movies WHERE lower("titleNorm") % lower(${term})
+      UNION ALL
+      SELECT 'serial' AS kind, id, code, title, views,
+             similarity(lower("titleNorm"), lower(${term})) AS sim
+      FROM serials WHERE lower("titleNorm") % lower(${term})
+    ) t
+    ORDER BY sim DESC
     LIMIT ${take}
   `;
   return rows.map((r): SearchHit => ({
