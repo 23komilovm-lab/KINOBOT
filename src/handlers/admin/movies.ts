@@ -12,6 +12,7 @@ import {
   adminMenuKeyboard,
 } from "../../utils/keyboard.js";
 import { buttonStyleLabel, isValidUrl, resolveButtonStyle } from "../../utils/contentButton.js";
+import { log } from "../../utils/logger.js";
 import {
   getSetting,
   setSetting,
@@ -301,8 +302,23 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
         prisma.movie.update({ where: { id: movie.id }, data: { shortMsgId: msgId } })
       );
       shortStatus = `📹 Qisqa video kino kanalga tashlandi.`;
+    } else if (error) {
+      shortStatus = `⚠️ Qisqa video tashlanmadi:\n<code>${e.escapeHtml(error)}</code>`;
     } else {
-      shortStatus = `⚠️ Qisqa video tashlanmadi:\n<code>${e.escapeHtml(error ?? "noma'lum xato")}</code>`;
+      // msgId ham, error ham yo'q — sendVideo na natija, na xato qaytargan.
+      // Oddiy xato yo'lida bu bo'lmaydi (har muvaffaqiyatsizlik lastError'ni
+      // to'ldiradi), demak suhbat qayta o'ynatilgan: konteyner qayta ishga
+      // tushgan yoki update takrorlangan. Bunday holda ASL yuborish Telegram
+      // tomonida ketgan bo'lishi mumkin — video kanalga bir necha soniyadan
+      // keyin tushadi. Shuning uchun "xato" deb emas, "tekshiring" deb aytamiz.
+      log("error", "Qisqa video: sendVideo natijasiz qaytdi (suhbat qayta o'ynatilgan?)", {
+        movieCode: movie.code,
+        movieId: movie.id,
+      });
+      shortStatus =
+        `⏳ Qisqa videoning holati noaniq — kanalni tekshiring.\n` +
+        `Video bir necha soniyadan keyin tushishi mumkin. Tushmagan bo'lsa ` +
+        `kino ro'yxatidan qayta yuboring.`;
     }
   } else {
     shortStatus = `ℹ️ Qisqa video o'tkazib yuborildi.`;
