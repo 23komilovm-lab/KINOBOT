@@ -67,7 +67,7 @@ async function getOrCreateBotInviteLink(
   // Avval DB dan tekshiramiz
   const ch = await prisma.channel.findUnique({
     where: { chatId },
-    select: { botInviteLink: true },
+    select: { botInviteLink: true, type: true },
   });
   if (ch?.botInviteLink) return ch.botInviteLink;
 
@@ -75,7 +75,12 @@ async function getOrCreateBotInviteLink(
   try {
     const link = await ctx.api.createChatInviteLink(Number(chatId), {
       name: "bot_tracking",
-      creates_join_request: false,
+      // SO'ROVLI KANALDA MAJBURIY `true`. `false` bo'lsa bu havola guruhning
+      // "yangi a'zolarni tasdiqlash" sozlamasini CHETLAB O'TADI va odamlar
+      // navbatsiz kirib ketadi (2026-08-12 da Guruh 2k da aynan shu bo'ldi:
+      // 9 ta qo'shilish, 0 ta zayifka). Darvoza baribir odamni darhol
+      // o'tkazadi — `pending` zayifka "obuna" deb hisoblanadi.
+      creates_join_request: ch?.type === "REQUEST",
     });
     await prisma.channel.update({
       where: { chatId },
@@ -481,13 +486,27 @@ channelsHandler.callbackQuery(/^ch:newlink:(\d+)$/, async (ctx) => {
   try {
     const link = await ctx.api.createChatInviteLink(Number(ch.chatId), {
       name: "bot_tracking",
-      creates_join_request: false,
+      // So'rovli kanalda tasdiqlash navbati saqlanishi shart — izoh
+      // getOrCreateBotInviteLink da.
+      creates_join_request: ch.type === "REQUEST",
     });
+    // Eskisini BEKOR QILAMIZ. Aks holda eski havola tirik qoladi va uni
+    // saqlab qo'ygan odamlar o'sha eski qoida bo'yicha kirishda davom etadi
+    // (masalan so'rovli kanalga navbatsiz). Statistika yo'qolmaydi — atributsiya
+    // havola satri bo'yicha emas, havolani KIM yaratgani bo'yicha ishlaydi.
+    if (ch.botInviteLink) {
+      await ctx.api.revokeChatInviteLink(Number(ch.chatId), ch.botInviteLink).catch(() => null);
+    }
     await prisma.channel.update({
       where: { id },
       data: { botInviteLink: link.invite_link },
     });
-    await ctx.answerCallbackQuery({ text: "✅ Yangi havola yaratildi." });
+    await ctx.answerCallbackQuery({
+      text:
+        ch.type === "REQUEST"
+          ? "✅ Yangi havola yaratildi (tasdiqlash talab qiladi). Eskisi bekor qilindi."
+          : "✅ Yangi havola yaratildi. Eskisi bekor qilindi.",
+    });
   } catch (err) {
     await ctx.answerCallbackQuery({
       text: `❌ Yaratib bo'lmadi: ${(err as Error).message}\n\nBotda "Havola orqali taklif qilish" huquqi bormi?`,
