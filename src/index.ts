@@ -7,6 +7,7 @@ import { config, isAdmin, syncAdminStateFromDb } from "./config.js";
 import { trackUser } from "./middlewares/user.js";
 import { formatError, log } from "./utils/logger.js";
 import { ATTRIB_WINDOW_MS, recordChannelJoin, recordChannelLeave } from "./utils/channelEvents.js";
+import { resolveJoinSource } from "./utils/joinSource.js";
 import { reconcileBroadcastJobs } from "./services/broadcastJob.js";
 
 import { adminHandler } from "./handlers/admin/index.js";
@@ -95,25 +96,12 @@ bot.on("chat_member", async (ctx) => {
 
   // Qo'shildi (statistika)
   if (!wasIn && nowIn) {
-    // Manba: Telegram qo'shilish hodisasida qaysi havola ishlatilganini aytadi.
-    // `invite_link` FAQAT havola orqali kirishda keladi — botning "bot_tracking"
-    // havolasi bo'lsa buni "bot" deb belgilaymiz, shunda referal statistikasi
-    // haqiqiy son ko'rsatadi. Bu yozilmasa hamma yozuv 'unknown' bo'lib qoladi
-    // va "Bot orqali qo'shilgan" har doim 0 chiqadi.
-    const usedLink = update.invite_link?.invite_link ?? null;
-    let source = "direct";
-    if (usedLink) {
-      source = usedLink === ch.botInviteLink ? "bot" : "link";
-    } else if (update.via_join_request) {
-      source = "request";
-    } else if (update.via_chat_folder_invite_link) {
-      source = "folder";
-    } else {
-      // Telegram manbani aytmadi (ochiq kanalga @username orqali kirilganda shunday
-      // bo'ladi). Bunday holda bot darvozasini tekshiramiz: agar shu odamga aynan
-      // shu kanal majburiy obuna sifatida ko'rsatilgan bo'lsa — u bot orqali kelgan.
-      // Sessiya kaliti = user id (sessionStorage.ts). Botga qaytmagan, "Tekshirish"
-      // bosmagan odamlar ham shu yerda hisobga olinadi.
+    // Manba aniqlash mantig'i `joinSource.ts` da (sof funksiya, sinovlar bilan).
+    // Bu yerda faqat I/O: Telegram yangilanishi + darvoza sessiyasini o'qiymiz.
+    // Sessiya kaliti = user id (sessionStorage.ts). Botga qaytmagan, "Tekshirish"
+    // bosmagan odamlar ham shu yo'l bilan hisobga olinadi.
+    let gate: { channels: string[]; at?: number } | null = null;
+    if (!update.invite_link && !update.via_join_request && !update.via_chat_folder_invite_link) {
       const sess = await prisma.session
         .findUnique({ where: { key: String(userId) } })
         .catch(() => null);
@@ -121,17 +109,25 @@ bot.on("chat_member", async (ctx) => {
         try {
           const scratch = JSON.parse(sess.value)?.scratch as Record<string, unknown> | undefined;
           const pending = scratch?.pendingSubChannels;
-          const at = scratch?.pendingSubAt;
-          // Yangilik sharti: darvoza oxirgi 30 daqiqada ko'rsatilgan bo'lsagina
-          // "bot" deb belgilaymiz. Eskirib qolgan sessiya (organik qo'shilish)
-          // soxta atributsiya yaratmasin.
-          const fresh = typeof at === "number" && Date.now() - at <= ATTRIB_WINDOW_MS;
-          if (Array.isArray(pending) && pending.includes(String(chatId)) && fresh) source = "bot";
+          if (Array.isArray(pending)) {
+            gate = { channels: pending as string[], at: scratch?.pendingSubAt as number };
+          }
         } catch {
-          // buzuq sessiya JSON — manbani "direct" qoldiramiz
+          // buzuq sessiya JSON — darvoza yo'q deb hisoblaymiz
         }
       }
     }
+
+    const source = resolveJoinSource({
+      inviteLink: update.invite_link,
+      viaJoinRequest: update.via_join_request,
+      viaChatFolderInviteLink: update.via_chat_folder_invite_link,
+      botId: ctx.me.id,
+      storedBotLink: ch.botInviteLink,
+      gate,
+      chatId: String(chatId),
+      windowMs: ATTRIB_WINDOW_MS,
+    });
 
     await recordChannelJoin(BigInt(chatId), userId, source);
     return;

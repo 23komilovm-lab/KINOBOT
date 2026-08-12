@@ -252,6 +252,12 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
       ? `\n⏳ Kutilayotgan so'rovlar: <b>${s.reqPending}</b>`
       : "";
 
+  // Tracking havolasi bo'lmasa statistika faqat darvoza sessiyasiga tayanadi —
+  // buni admin bilib tursin (odatda botda "havola orqali taklif" huquqi yo'q).
+  const linkLine = c.botInviteLink
+    ? `\n🔗 Tracking havolasi: <code>${e.escapeHtml(c.botInviteLink)}</code>`
+    : `\n⚠️ Tracking havolasi yo'q — "♻️ Yangi havola" tugmasini bosing.`;
+
   return (
     `${header}\n\n` +
     `<b>📊 Bot orqali qo'shilgan yagona odamlar:</b>\n` +
@@ -267,7 +273,8 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
     `  📁 Papka: <b>${s.source.folder}</b>\n` +
     `  ❔ Noma'lum: <b>${s.source.unknown}</b>\n` +
     `<i>"Noma'lum" — eski yozuvlar yoki Telegram manba bermagan holat. ` +
-    `Kuzatuvdan oldingi qo'shilishlar ham shu yerga kiradi.</i>`
+    `Kuzatuvdan oldingi qo'shilishlar ham shu yerga kiradi.</i>` +
+    linkLine
   );
 }
 
@@ -339,6 +346,10 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
   ];
   if (c.type !== "INSTAGRAM") {
     rows.push([ibtn("🔄 Yangilash", `ch:refresh:${c.id}`, "primary")]);
+    rows.push([
+      ibtn("♻️ Yangi havola", `ch:newlink:${c.id}`, "primary"),
+      ibtn("📎 Havolani ulash", `ch:setlink:${c.id}`, "primary"),
+    ]);
   }
   if (c.type === "REQUEST") {
     rows.push([ibtn("📋 So'rovlarni boshqarish", "ch:jrstats", "primary")]);
@@ -405,6 +416,66 @@ channelsHandler.callbackQuery(/^ch:editlabel:(\d+)$/, async (ctx) => {
 channelsHandler.callbackQuery("ch:editlabel:cancel", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "❌ Bekor qilindi." });
   if (ctx.session.scratch) delete ctx.session.scratch.editChannelLabel;
+  await refreshMenu(ctx);
+});
+
+// ============ TRACKING HAVOLASI ============
+// Statistika "bot orqali qo'shilgan" ni havolani KIM yaratganiga qarab sanaydi
+// (index.ts: creator.id === bot.id), shuning uchun yangi havola yaratilsa ham
+// eskisi bilan kelganlar yo'qolmaydi — ikkalasi ham botniki.
+
+/** Yangi "bot_tracking" havolasi yaratadi va DB'ga yozadi (eskisini bekor qilmaydi) */
+channelsHandler.callbackQuery(/^ch:newlink:(\d+)$/, async (ctx) => {
+  const id = Number(ctx.match[1]);
+  const ch = await prisma.channel.findUnique({ where: { id } });
+  if (!ch || ch.type === "INSTAGRAM") {
+    await ctx.answerCallbackQuery({ text: "Topilmadi.", show_alert: true });
+    return;
+  }
+  try {
+    const link = await ctx.api.createChatInviteLink(Number(ch.chatId), {
+      name: "bot_tracking",
+      creates_join_request: false,
+    });
+    await prisma.channel.update({
+      where: { id },
+      data: { botInviteLink: link.invite_link },
+    });
+    await ctx.answerCallbackQuery({ text: "✅ Yangi havola yaratildi." });
+  } catch (err) {
+    await ctx.answerCallbackQuery({
+      text: `❌ Yaratib bo'lmadi: ${(err as Error).message}\n\nBotda "Havola orqali taklif qilish" huquqi bormi?`,
+      show_alert: true,
+    });
+    return;
+  }
+  await renderChannelDetail(ctx, id);
+});
+
+/** Mavjud havolani ulash — faqat BOT yaratgan havola qabul qilinadi */
+channelsHandler.callbackQuery(/^ch:setlink:(\d+)$/, async (ctx) => {
+  const id = Number(ctx.match[1]);
+  const ch = await prisma.channel.findUnique({ where: { id } });
+  if (!ch || ch.type === "INSTAGRAM") {
+    await ctx.answerCallbackQuery({ text: "Topilmadi.", show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  ctx.session.scratch = { setChannelLink: id };
+  await ctx.reply(
+    `<b>${e.escapeHtml(ch.title)}</b> uchun tracking havolasini yuboring.\n\n` +
+      `Hozirgi: <code>${e.escapeHtml(ch.botInviteLink ?? "(yo'q)")}</code>\n\n` +
+      `⚠️ Faqat <b>shu bot yaratgan</b> havola qabul qilinadi. Telegram boshqa ` +
+      `admin yaratgan havolani botga niqoblab ko'rsatadi ("…"), shuning uchun ` +
+      `o'zingiz yaratgan havola statistikada ishlamaydi.\n\n` +
+      `Kanal sozlamalari → Taklif havolalari → bot nomidagi havolani nusxalang.`,
+    { reply_markup: kb([ibtn("Bekor qilish", "ch:setlink:cancel", "danger")]) }
+  );
+});
+
+channelsHandler.callbackQuery("ch:setlink:cancel", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "❌ Bekor qilindi." });
+  if (ctx.session.scratch) delete ctx.session.scratch.setChannelLink;
   await refreshMenu(ctx);
 });
 
@@ -630,6 +701,52 @@ channelsHandler.on("message", async (ctx, next) => {
   const editLabelId = ctx.session.scratch?.editChannelLabel as number | undefined;
   const editSubBtn = !!ctx.session.scratch?.editSubBtnText;
   const editDefLabel = !!ctx.session.scratch?.editChannelDefLabel;
+  const setLinkId = ctx.session.scratch?.setChannelLink as number | undefined;
+
+  // Tracking havolasini qo'lda ulash
+  if (setLinkId) {
+    if (ctx.message?.chat_shared) return next();
+    const msgText = ctx.message?.text?.trim();
+    if (!msgText) return next();
+    if (msgText === "❌ Bekor qilish" || msgText === "/cancel") {
+      ctx.session.scratch = {};
+      await ctx.reply("❌ Bekor qilindi.");
+      return;
+    }
+    const ch = await prisma.channel.findUnique({ where: { id: setLinkId } });
+    if (!ch) {
+      ctx.session.scratch = {};
+      await ctx.reply("❌ Kanal topilmadi.");
+      return;
+    }
+    if (!/^https:\/\/t\.me\//i.test(msgText) || msgText.includes("…") || msgText.includes("...")) {
+      await ctx.reply(
+        "❌ Bu to'liq havolaga o'xshamaydi. <code>https://t.me/+...</code> ko'rinishida, " +
+          "qisqartirilmagan holda yuboring."
+      );
+      return;
+    }
+    // EGALIKNI TEKSHIRISH: editChatInviteLink faqat BOT yaratgan (va birlamchi
+    // bo'lmagan) havolani tahrirlaydi — muvaffaqiyat = havola rostdan botniki.
+    // Yon ta'siri: havolaga "bot_tracking" nomi qo'yiladi, muddat/a'zo limiti
+    // tozalanadi (tracking havolasi uchun aynan shu kerak).
+    try {
+      await ctx.api.editChatInviteLink(Number(ch.chatId), msgText, { name: "bot_tracking" });
+    } catch (err) {
+      await ctx.reply(
+        `❌ Bu havolani bot tahrirlay olmadi: <code>${e.escapeHtml((err as Error).message)}</code>\n\n` +
+          `Demak uni bot yaratmagan (yoki bu botning birlamchi havolasi). Statistika ` +
+          `ishlashi uchun havolani bot yaratishi kerak — "♻️ Yangi havola" tugmasidan foydalaning.`
+      );
+      return;
+    }
+    await prisma.channel.update({ where: { id: setLinkId }, data: { botInviteLink: msgText } });
+    ctx.session.scratch = {};
+    await ctx.reply(
+      `${ce("check")} Tracking havolasi ulandi:\n<code>${e.escapeHtml(msgText)}</code>`
+    );
+    return;
+  }
 
   // Kanal standart yorlig'ini tahrirlash
   if (editDefLabel) {
@@ -999,7 +1116,18 @@ channelsHandler.callbackQuery("ch:del", async (ctx) => {
 channelsHandler.callbackQuery(/^ch:delconf:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   try {
-    const ch = await prisma.channel.findUnique({ where: { id }, select: { chatId: true } });
+    const ch = await prisma.channel.findUnique({
+      where: { id },
+      select: { chatId: true, botInviteLink: true },
+    });
+    // Tracking havolasi kanalda yetim qolmasin: kanal qayta qo'shilsa yangisi
+    // yaratiladi va eskisi bilan kirganlar hamon "bot" deb sanaladi (creator
+    // bo'yicha), lekin ishlatilmaydigan havolalar to'planib qolishi shart emas.
+    if (ch?.botInviteLink) {
+      await ctx.api
+        .revokeChatInviteLink(Number(ch.chatId), ch.botInviteLink)
+        .catch(() => null);
+    }
     await prisma.channel.delete({ where: { id } });
     // O'chirilgan kanalning a'zo-soni keshida eski qiymat qolib ketmasin.
     if (ch) clearMemberCount(ch.chatId);
