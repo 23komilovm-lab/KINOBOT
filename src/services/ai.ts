@@ -88,7 +88,13 @@ export const PROVIDERS: Provider[] = [
     style: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
     key: () => config.geminiApiKey,
-    models: [{ id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" }],
+    // Gemini 2.0 oilasi 2026-06-01 da BUTUNLAY o'chirilgan (404 "no longer
+    // available") — prodda har bir Gemini so'rovi shu yerda yiqilardi.
+    // 3.x tanlandi: 2.5 uchun 2026-10-16 da yana majburiy ko'chish bor.
+    models: [
+      { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash — rasm ham" },
+      { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite (arzon)" },
+    ],
   },
 ];
 
@@ -139,7 +145,9 @@ export interface AiCallOpts {
   maxTokens?: number; // standart 800; qisqa ichki so'rovlar (masalan kalit so'z ajratish) uchun kamaytiriladi
 }
 
-const REQUEST_TIMEOUT_MS = 12_000;
+// 12s Mistral Large uchun kam edi — prodda har safar "This operation was
+// aborted" bilan uzilib, provayder amalda hech qachon javob bermasdi.
+const REQUEST_TIMEOUT_MS = 25_000;
 
 async function fetchOnce(url: string, init: RequestInit): Promise<Response> {
   const ctrl = new AbortController();
@@ -177,14 +185,17 @@ async function fetchResilient(url: string, init: RequestInit): Promise<Response>
 // kuchli model birinchi. Rasm so'rovlari kam bo'lgani uchun GitHub Models'ning
 // past kunlik limiti bu yerda muammo emas (matn oqimida esa Groq birinchi
 // turadi — u yerda hajm muhimroq).
+// TARTIB: GitHub Models 410 "retirement brownout" qaytaryapti (servis yopilmoqda),
+// shuning uchun u boshdan OXIRGA ko'chirildi — ilgari zanjirning ikkita birinchi
+// bandi ham o'sha yerda edi va rasm qidiruvi hech qachon ishlamasdi.
 const VISION_MODELS: { provider: ProviderId; model: string }[] = [
-  { provider: "github", model: "openai/gpt-4.1-mini" },
-  { provider: "github", model: "openai/gpt-4o-mini" },
+  { provider: "gemini", model: "gemini-3.6-flash" },
   { provider: "openrouter", model: "google/gemma-4-26b-a4b-it:free" },
   { provider: "openrouter", model: "nvidia/nemotron-nano-12b-v2-vl:free" },
   { provider: "mistral", model: "pixtral-12b-latest" },
   { provider: "openrouter", model: "openrouter/free" },
-  { provider: "gemini", model: "gemini-2.0-flash" },
+  { provider: "github", model: "openai/gpt-4.1-mini" },
+  { provider: "github", model: "openai/gpt-4o-mini" },
 ];
 
 function parseDataUrl(dataUrl: string): { mime: string; base64: string } | null {
