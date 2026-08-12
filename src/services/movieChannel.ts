@@ -149,15 +149,22 @@ export function classifyError(err: unknown): "retry" | "fatal" {
 /**
  * Qisqa videoni kino kanalga tashlaydi — 3 urinish, 1s/3s backoff bilan.
  * Vaqtinchalik (network/429/5xx) xatolarda qayta urinadi; doimiy xatoda darhol
- * taslim bo'ladi. { msgId } yoki { error } qaytaradi.
+ * taslim bo'ladi.
+ *
+ * `posted` — video kanalga TUSHDIMI (muvaffaqiyat shu bilan o'lchanadi).
+ * `msgId`  — keyin tahrirlash/o'chirish uchun id; Telegram ba'zi kanallarda
+ *            `message_id: 0` qaytaradi (xabar joylanadi, lekin id berilmaydi),
+ *            shunda `null` bo'ladi. MUHIM: `posted` va `msgId` ni ARALASHTIRMANG —
+ *            ilgari `if (msgId)` tekshiruvi 0 ni falsy deb, muvaffaqiyatli
+ *            yuborishni "noma'lum xato" deb ko'rsatardi.
  */
 export async function postToMovieChannel(
   ctx: MyContext,
   movie: Movie,
   shortFileId: string
-): Promise<{ msgId: number | null; error: string | null }> {
+): Promise<{ posted: boolean; msgId: number | null; error: string | null }> {
   if (!config.movieChannelId) {
-    return { msgId: null, error: "MOVIE_CHANNEL_ID sozlanmagan (.env)" };
+    return { posted: false, msgId: null, error: "MOVIE_CHANNEL_ID sozlanmagan (.env)" };
   }
 
   const ATTEMPTS = 3;
@@ -180,22 +187,21 @@ export async function postToMovieChannel(
         reply_markup: { inline_keyboard: [[btn]] } as any,
       });
 
-      // sendVideo na xato tashladi, na message_id qaytardi. Bu grammY
-      // conversations qayta o'ynatishida bo'ladi: suhbat ichidagi API chaqiruvi
-      // log'dan javob oladi va log'da bu chaqiruv yo'q bo'lsa natija bo'sh
-      // keladi. Ilgari bu jimgina "noma'lum xato" bo'lib chiqardi — endi aniq
-      // yozamiz, chunki ASL yuborish Telegram tomonida ketgan bo'lishi mumkin.
-      if (!sent?.message_id) {
-        lastError = `sendVideo javobi bo'sh (${JSON.stringify(sent)?.slice(0, 160) ?? "undefined"})`;
-        log("error", "Qisqa video: sendVideo message_id'siz qaytdi", {
+      // Xato otilmadi — video KANALGA TUSHDI. Muvaffaqiyat shu bilan o'lchanadi.
+      //
+      // Telegram bu kanalda `message_id: 0` qaytaradi: xabar joylanadi, lekin
+      // id berilmaydi (2026-08-12 da prodda aynan shu bo'ldi — video kanalda
+      // turgani holda admin "tashlanmadi: noma'lum xato" xabarini ko'rardi,
+      // chunki 0 JavaScript'da falsy). Bunday holda id'ni saqlamaymiz — u
+      // bilan keyin tahrirlash/o'chirish imkonsiz.
+      const id = sent?.message_id;
+      if (!id) {
+        log("warn", "Qisqa video tashlandi, lekin message_id berilmadi", {
           movieCode: movie.code,
-          attempt: attempt + 1,
-          response: JSON.stringify(sent)?.slice(0, 300) ?? "undefined",
+          response: JSON.stringify(sent)?.slice(0, 200) ?? "undefined",
         });
-        break; // qayta urinish foydasiz — muammo javobda, tarmoqda emas
       }
-
-      return { msgId: sent.message_id, error: null };
+      return { posted: true, msgId: id && id > 0 ? id : null, error: null };
     } catch (err) {
       lastError = describeError(err);
       // Railway logida urinish va aniq sabab ko'rinishi kerak
@@ -210,5 +216,5 @@ export async function postToMovieChannel(
     }
   }
 
-  return { msgId: null, error: lastError ?? "noma'lum xato" };
+  return { posted: false, msgId: null, error: lastError ?? "noma'lum xato" };
 }

@@ -290,7 +290,10 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
           caption: `#serial ${e.escapeHtml(serialTitle)} · S${seasonNum}E${epNum}`,
         })
       );
-      baseMsgId = sent.message_id;
+      // Telegram ba'zi kanallarda `message_id: 0` qaytaradi — xabar joylanadi,
+      // lekin id berilmaydi. 0 ni saqlamaymiz (u bilan tahrirlab/o'chirib
+      // bo'lmaydi), lekin bu yuborish muvaffaqiyatsiz degani EMAS.
+      baseMsgId = sent?.message_id && sent.message_id > 0 ? sent.message_id : null;
     } catch (err) {
       console.error(`🛑 Serial episod baza kanalga tashlanmadi (S${seasonNum}E${epNum}):`, err);
       await ctx.reply(

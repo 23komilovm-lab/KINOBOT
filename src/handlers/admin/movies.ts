@@ -13,7 +13,6 @@ import {
   adminMenuKeyboard,
 } from "../../utils/keyboard.js";
 import { buttonStyleLabel, isValidUrl, resolveButtonStyle } from "../../utils/contentButton.js";
-import { log } from "../../utils/logger.js";
 import {
   getSetting,
   setSetting,
@@ -280,6 +279,12 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   );
 
   // Baza kanalga arxiv posti — muvaffaqiyatsiz bo'lsa ham kino ishlayveradi
+  //
+  // MUHIM: muvaffaqiyat `message_id` bilan emas, XATO OTILMAGANI bilan
+  // o'lchanadi. Telegram ba'zi kanallarda `message_id: 0` qaytaradi (xabar
+  // joylanadi, id berilmaydi) — 0 falsy bo'lgani uchun ilgari tushgan post
+  // "tashlanmadi" deb ko'rsatilardi.
+  let basePosted = false;
   if (config.baseChannelId) {
     try {
       // conversation.external + bot.api: suhbat ichidagi `ctx.api` chaqiruvi
@@ -289,9 +294,13 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
           caption: `#kino #${code}\n🎬 ${e.escapeHtml(title)}`,
         })
       );
-      await conversation.external(() =>
-        prisma.movie.update({ where: { id: movie.id }, data: { baseMsgId: sent.message_id } })
-      );
+      basePosted = true;
+      const baseMsgId = sent?.message_id && sent.message_id > 0 ? sent.message_id : null;
+      if (baseMsgId) {
+        await conversation.external(() =>
+          prisma.movie.update({ where: { id: movie.id }, data: { baseMsgId } })
+        );
+      }
     } catch (err) {
       console.error(`🛑 Kino baza kanalga tashlanmadi (kod ${code}):`, err);
       await ctx.reply(`⚠️ Baza kanalga tashlab bo'lmadi: ${e.escapeHtml(describeError(err))}`);
@@ -301,31 +310,18 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   // Qisqa videoni kino kanalga tashlash
   let shortStatus: string;
   if (shortFileId) {
-    const { msgId, error } = await conversation.external(() =>
+    const { posted, msgId, error } = await conversation.external(() =>
       postToMovieChannel(ctx, movie, shortFileId)
     );
-    if (msgId) {
-      await conversation.external(() =>
-        prisma.movie.update({ where: { id: movie.id }, data: { shortMsgId: msgId } })
-      );
+    if (posted) {
+      if (msgId) {
+        await conversation.external(() =>
+          prisma.movie.update({ where: { id: movie.id }, data: { shortMsgId: msgId } })
+        );
+      }
       shortStatus = `📹 Qisqa video kino kanalga tashlandi.`;
-    } else if (error) {
-      shortStatus = `⚠️ Qisqa video tashlanmadi:\n<code>${e.escapeHtml(error)}</code>`;
     } else {
-      // msgId ham, error ham yo'q — sendVideo na natija, na xato qaytargan.
-      // Oddiy xato yo'lida bu bo'lmaydi (har muvaffaqiyatsizlik lastError'ni
-      // to'ldiradi), demak suhbat qayta o'ynatilgan: konteyner qayta ishga
-      // tushgan yoki update takrorlangan. Bunday holda ASL yuborish Telegram
-      // tomonida ketgan bo'lishi mumkin — video kanalga bir necha soniyadan
-      // keyin tushadi. Shuning uchun "xato" deb emas, "tekshiring" deb aytamiz.
-      log("error", "Qisqa video: sendVideo natijasiz qaytdi (suhbat qayta o'ynatilgan?)", {
-        movieCode: movie.code,
-        movieId: movie.id,
-      });
-      shortStatus =
-        `⏳ Qisqa videoning holati noaniq — kanalni tekshiring.\n` +
-        `Video bir necha soniyadan keyin tushishi mumkin. Tushmagan bo'lsa ` +
-        `kino ro'yxatidan qayta yuboring.`;
+      shortStatus = `⚠️ Qisqa video tashlanmadi:\n<code>${e.escapeHtml(error ?? "noma'lum xato")}</code>`;
     }
   } else {
     shortStatus = `ℹ️ Qisqa video o'tkazib yuborildi.`;
@@ -335,7 +331,7 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
     `${ce("check")} <b>Kino qo'shildi!</b>\n\n` +
       `🎬 ${e.escapeHtml(movie.title)}\n` +
       `${ce("star")} Kod: <code>${movie.code}</code>\n` +
-      (movie.baseMsgId ? `📦 Baza kanalga tashlandi.\n` : `ℹ️ Baza kanalga tashlanmadi.\n`) +
+      (basePosted ? `📦 Baza kanalga tashlandi.\n` : `ℹ️ Baza kanalga tashlanmadi.\n`) +
       shortStatus,
     { reply_markup: adminMenuKeyboard(ownerId) }
   );
