@@ -215,6 +215,13 @@ export interface ChannelStatsData {
   memberCount: number | null;
   reqPending: number;
   source: { bot: number; link: number; request: number; folder: number; unknown: number };
+  /**
+   * Faqat REQUEST kanallar uchun: zayifka (join request) hisoblari.
+   * Bunday kanalda darvoza `pending` so'rovni "obuna" deb hisoblaydi va odam
+   * darhol o'tadi — ya'ni ODAM GURUHGA KIRMAGAN, navbatda turibdi. Shuning
+   * uchun asosiy ko'rsatkich "qo'shilgan" emas, ZAYIFKA soni bo'lishi kerak.
+   */
+  req?: { today: number; week: number; month: number; total: number; approved: number };
 }
 
 /**
@@ -247,16 +254,39 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
     return `${header}\n\n<b>📊 Statistikalar:</b> —`;
   }
 
-  const reqLine =
-    c.type === "REQUEST" && s.reqPending > 0
-      ? `\n⏳ Kutilayotgan so'rovlar: <b>${s.reqPending}</b>`
-      : "";
-
   // Tracking havolasi bo'lmasa statistika faqat darvoza sessiyasiga tayanadi —
   // buni admin bilib tursin (odatda botda "havola orqali taklif" huquqi yo'q).
   const linkLine = c.botInviteLink
     ? `\n🔗 Tracking havolasi: <code>${e.escapeHtml(c.botInviteLink)}</code>`
     : `\n⚠️ Tracking havolasi yo'q — "♻️ Yangi havola" tugmasini bosing.`;
+
+  // SO'ROVLI KANAL — butunlay boshqa hisob.
+  //
+  // Darvoza `pending` zayifkani "obuna" deb hisoblaydi va odamni o'tkazadi
+  // (bu ATAYLAB shunday: zayifkalar to'planib, egasi xohlagan paytda ommaviy
+  // tasdiqlaydi). Demak odam guruhga KIRMAGAN — navbatda turibdi. Shuning
+  // uchun "qo'shilgan odamlar" raqami bu yerda noto'g'ri bo'lardi.
+  //
+  // Asosiy metrika — ZAYIFKA soni: u butun oqimni qamraydi. `ChannelEvent`
+  // atributsiyasi esa faqat 2026-08-09 dan beri ishlaydi, ya'ni undan oldingi
+  // zayifkalar "bot" deb belgilanmagan — shuning uchun u yordamchi raqam.
+  if (c.type === "REQUEST" && s.req) {
+    const r = s.req;
+    return (
+      `${header}\n\n` +
+      `<b>📨 Zayifkalar (bot darvozasi orqali):</b>\n` +
+      `  Bugun: <b>${r.today}</b> · 7 kun: <b>${r.week}</b> · ` +
+      `30 kun: <b>${r.month}</b> · Jami: <b>${r.total}</b>\n` +
+      `⏳ Navbatda kutayapti: <b>${s.reqPending}</b>\n` +
+      `✅ Tasdiqlangan: <b>${r.approved}</b>\n` +
+      `👥 Hozirgi a'zolar (Telegram): <b>${s.memberCount ?? "—"}</b>\n` +
+      `🤖 Kuzatuv tasdiqlagan: <b>${s.botTotal}</b>\n` +
+      `<i>Zayifka yuborgan odam guruhga hali KIRMAGAN — tasdiqlashni kutyapti. ` +
+      `"Kuzatuv tasdiqlagan" faqat 09.08.2026 dan beri yozilyapti, shuning uchun ` +
+      `jami zayifkadan kam ko'rinadi.</i>` +
+      linkLine
+    );
+  }
 
   return (
     `${header}\n\n` +
@@ -265,7 +295,6 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
     `30 kun: <b>${s.botMonth}</b> · Jami: <b>${s.botTotal}</b>\n` +
     `👥 Hozirgi a'zolar (Telegram): <b>${s.memberCount ?? "—"}</b>\n` +
     `🤖 Bot orqali, hozir a'zoda: <b>${s.currentBot}</b>` +
-    reqLine +
     `\n\n🧭 <b>Manba (jami, yagona):</b>\n` +
     `  🤖 Bot: <b>${s.source.bot}</b>\n` +
     `  🔗 Havola: <b>${s.source.link}</b>\n` +
@@ -295,6 +324,7 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
     memberCount: null,
     reqPending: 0,
     source: { bot: 0, link: 0, request: 0, folder: 0, unknown: 0 },
+    req: undefined,
   };
 
   if (c.type !== "INSTAGRAM") {
@@ -318,6 +348,21 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
           : Promise.resolve(0),
       ]);
 
+    // So'rovli kanalda asosiy metrika — zayifka soni (yuqoridagi izohga qarang).
+    // `joinRequest.date` bo'yicha, kanal statistikasi bilan bir xil Toshkent oynalari.
+    let req: ChannelStatsData["req"];
+    if (c.type === "REQUEST") {
+      const where = { channelId: c.chatId };
+      const [rToday, rWeek, rMonth, rTotal, rApproved] = await Promise.all([
+        prisma.joinRequest.count({ where: { ...where, date: { gte: today } } }),
+        prisma.joinRequest.count({ where: { ...where, date: { gte: week } } }),
+        prisma.joinRequest.count({ where: { ...where, date: { gte: month } } }),
+        prisma.joinRequest.count({ where }),
+        prisma.joinRequest.count({ where: { ...where, status: "approved" } }),
+      ]);
+      req = { today: rToday, week: rWeek, month: rMonth, total: rTotal, approved: rApproved };
+    }
+
     // `direct` va `unknown` — ikkalasi ham "Telegram/tegishli manba bermagan" degani.
     // Adashtirmaslik uchun bitta "Noma'lum" bucket'ga birlashtiriladi (faqat ko'rsatish).
     statsData = {
@@ -329,6 +374,7 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
       memberCount,
       reqPending,
       source: mergeSourceBuckets(sourceMap),
+      req,
     };
   }
 

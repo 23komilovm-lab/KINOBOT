@@ -214,12 +214,40 @@ describe("buildChannelStatsPanel", () => {
     expect(panel).toContain('"Noma\'lum"');
   });
 
-  it("REQUEST — faqat pending > 0 bo'lsa so'rov satri chiqadi", () => {
+  it("REQUEST — asosiy metrika ZAYIFKA soni, 'qo'shilgan' emas", () => {
+    // Darvoza pending zayifkani "obuna" deb hisoblaydi va odamni o'tkazadi, lekin
+    // u guruhga KIRMAGAN. Shuning uchun bu kanalda "qo'shilgan odamlar" emas,
+    // zayifka soni ko'rsatilishi kerak.
     const c = chan({ type: "REQUEST" });
-    expect(buildChannelStatsPanel(c, stats({ reqPending: 0 }))).not.toContain("Kutilayotgan so'rovlar");
-    expect(buildChannelStatsPanel(c, stats({ reqPending: 3 }))).toContain("⏳ Kutilayotgan so'rovlar: <b>3</b>");
-    // non-REQUEST — pending qiymatiga qaramay so'rov satri yo'q
-    expect(buildChannelStatsPanel(chan({}), stats({ reqPending: 3 }))).not.toContain("Kutilayotgan so'rovlar");
+    const panel = buildChannelStatsPanel(
+      c,
+      stats({
+        reqPending: 10471,
+        botTotal: 1868,
+        req: { today: 777, week: 3177, month: 10471, total: 10471, approved: 0 },
+      })
+    );
+    expect(panel).toContain("📨 Zayifkalar");
+    expect(panel).toContain("Bugun: <b>777</b>");
+    expect(panel).toContain("⏳ Navbatda kutayapti: <b>10471</b>");
+    expect(panel).toContain("✅ Tasdiqlangan: <b>0</b>");
+    expect(panel).toContain("🤖 Kuzatuv tasdiqlagan: <b>1868</b>");
+    // Adashtiradigan "qo'shilgan odamlar" sarlavhasi bu yerda BO'LMASLIGI kerak
+    expect(panel).not.toContain("Bot orqali qo'shilgan yagona odamlar");
+  });
+
+  it("REQUEST — req ma'lumoti bo'lmasa oddiy panelga qaytadi", () => {
+    const panel = buildChannelStatsPanel(chan({ type: "REQUEST" }), stats({ reqPending: 3 }));
+    expect(panel).toContain("Bot orqali qo'shilgan yagona odamlar");
+  });
+
+  it("non-REQUEST kanalda zayifka bloki chiqmaydi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ reqPending: 3, req: { today: 1, week: 2, month: 3, total: 3, approved: 0 } })
+    );
+    expect(panel).not.toContain("Zayifkalar");
+    expect(panel).toContain("Bot orqali qo'shilgan yagona odamlar");
   });
 
   it("username yo'q bo'lsa havola ko'rsatiladi (umuman yo'q bo'lsa — '(havola yo'q)')", () => {
