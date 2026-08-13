@@ -9,6 +9,7 @@ import { formatError, log } from "./utils/logger.js";
 import { ATTRIB_WINDOW_MS, recordChannelJoin, recordChannelLeave } from "./utils/channelEvents.js";
 import { resolveJoinSource } from "./utils/joinSource.js";
 import { reconcileBroadcastJobs } from "./services/broadcastJob.js";
+import { startChannelHealthWatcher } from "./services/channelHealth.js";
 
 import { adminHandler } from "./handlers/admin/index.js";
 import { startHandler } from "./handlers/start.js";
@@ -57,6 +58,10 @@ bot.on("chat_join_request", async (ctx) => {
   const known = await prisma.channel.findUnique({ where: { chatId: BigInt(chatId) } });
   if (!known) return;
 
+  // Zayifka QAYSI havola orqali kelgani — havola kesimidagi statistika uchun
+  // (so'rovli kanalda asosiy metrika aynan zayifka soni).
+  const reqLink = ctx.chatJoinRequest.invite_link?.invite_link ?? null;
+
   // So'rovni bazaga yozish (yoki mavjud bo'lsa yangilash)
   await prisma.joinRequest
     .upsert({
@@ -66,9 +71,12 @@ bot.on("chat_join_request", async (ctx) => {
         userId: BigInt(userId),
         firstName: ctx.chatJoinRequest.from.first_name ?? null,
         username: ctx.chatJoinRequest.from.username ?? null,
+        inviteLink: reqLink,
         status: "pending",
       },
-      update: { status: "pending", date: new Date() },
+      // Qayta zayifka — yangi havola bilan kelgan bo'lishi mumkin. Havola
+      // ma'lum bo'lsa yangilanadi, ma'lum bo'lmasa eskisi saqlanadi.
+      update: { status: "pending", date: new Date(), ...(reqLink ? { inviteLink: reqLink } : {}) },
     })
     .catch(() => null);
 
@@ -129,7 +137,15 @@ bot.on("chat_member", async (ctx) => {
       windowMs: ATTRIB_WINDOW_MS,
     });
 
-    await recordChannelJoin(BigInt(chatId), userId, source);
+    // Havola kesimi: Telegram bergan aynan o'sha havola satri yoziladi, shuning
+    // uchun havola yangilangandan keyin ham eski havola bilan kelganlar alohida
+    // ko'rinadi (ikkalasi ham "bot" bo'lib sanalishi o'zgarmaydi).
+    await recordChannelJoin(
+      BigInt(chatId),
+      userId,
+      source,
+      update.invite_link?.invite_link ?? null
+    );
 
     // SO'ROVLI KANAL: odam ichkariga kirdi — demak zayifkasi tasdiqlangan.
     // Bot paneli orqali tasdiqlanganda status joinStats.ts da yoziladi, lekin
@@ -258,6 +274,11 @@ async function main() {
     .catch(() => {});
 
   const me = await bot.api.getMe();
+
+  // Kanal sog'ligi: bot admin huquqidan mahrum bo'lsa yoki tracking havolasi
+  // o'lsa — majburiy obuna tekshiruvi HAMMA foydalanuvchini bloklaydi va bu
+  // hech qanday xato bermaydi. Davriy tekshirib, egaga xabar beramiz.
+  startChannelHealthWatcher(bot.api, me.id);
 
   // Ikkala rejim uchun bir xil — chat_member va channel_post ham keladi
   const ALLOWED_UPDATES = [

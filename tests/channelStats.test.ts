@@ -10,6 +10,7 @@ vi.mock("../src/prisma.js", () => ({
 }));
 
 import {
+  countBotJoinsBySignal,
   countDistinctBotJoins,
   countDistinctJoinsBySource,
   currentBotMembers,
@@ -25,9 +26,8 @@ let buildChannelStatsPanel: (c: Channel, s: ChannelStatsData) => string;
 let mergeSourceBuckets: (m: ReadonlyMap<string, number>) => ChannelStatsData["source"];
 
 beforeAll(async () => {
-  ({ buildChannelStatsPanel, mergeSourceBuckets } = await import(
-    "../src/handlers/admin/channels.js"
-  ));
+  ({ buildChannelStatsPanel, mergeSourceBuckets } =
+    await import("../src/handlers/admin/channels.js"));
 });
 
 beforeEach(() => {
@@ -72,7 +72,11 @@ describe("countDistinctBotJoins", () => {
    * `.sql`/`.values` da yashaydi. Shuning uchun ikkala qatlam tekshiriladi.
    */
   function extractCall() {
-    const call = queryRaw.mock.calls[0] as [TemplateStringsArray, bigint, { sql: string; values: unknown[] }];
+    const call = queryRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      bigint,
+      { sql: string; values: unknown[] },
+    ];
     const [strings, channelId, cond] = call;
     return { strings, channelId, cond };
   }
@@ -139,6 +143,45 @@ describe("countDistinctJoinsBySource", () => {
   });
 });
 
+describe("countBotJoinsBySignal", () => {
+  it("dalil / taxmin / kuzatuvdan oldingi — uchga ajratadi", async () => {
+    queryRaw.mockResolvedValueOnce([{ by_link: 12, by_gate: 40, legacy: 810 }]);
+    await expect(countBotJoinsBySignal(123n, null)).resolves.toEqual({
+      byLink: 12,
+      byGate: 40,
+      legacy: 810,
+    });
+
+    const [strings] = queryRaw.mock.calls[0] as [TemplateStringsArray];
+    const sql = strings.join("?");
+    expect(sql).toContain(`FILTER (WHERE e."inviteLink" IS NOT NULL)`);
+    expect(sql).toContain("COUNT(DISTINCT");
+    expect(sql).toContain("'bot'");
+  });
+
+  it("chegara — havolasi bor ENG BIRINCHI yozuv vaqti (kodda qattiq sana yo'q)", async () => {
+    // Qattiq sana deploy vaqtiga bog'liq bo'lardi va noto'g'ri chegara berardi.
+    queryRaw.mockResolvedValueOnce([{ by_link: 0, by_gate: 0, legacy: 0 }]);
+    await countBotJoinsBySignal(123n, null);
+    const [strings] = queryRaw.mock.calls[0] as [TemplateStringsArray];
+    const sql = strings.join("?").replace(/\s+/g, " ");
+    expect(sql).toContain("WITH cutoff AS");
+    expect(sql).toContain(`COALESCE(MIN("date"), now())`);
+    // Kuzatuv boshlanmagan bo'lsa hamma yozuv "legacy" tomonga tushishi kerak
+    expect(sql).toMatch(/e\."date" < \(SELECT t FROM cutoff\)/);
+    expect(sql).toMatch(/e\."date" >= \(SELECT t FROM cutoff\)/);
+  });
+
+  it("bo'sh natija → uchalasi 0", async () => {
+    queryRaw.mockResolvedValueOnce([]);
+    await expect(countBotJoinsBySignal(123n, null)).resolves.toEqual({
+      byLink: 0,
+      byGate: 0,
+      legacy: 0,
+    });
+  });
+});
+
 describe("currentBotMembers", () => {
   it("channel_members snapshot'idan joriy bot a'zolarini so'raydi", async () => {
     queryRaw.mockResolvedValueOnce([{ n: 5 }]);
@@ -185,9 +228,18 @@ describe("buildChannelStatsPanel", () => {
   it("non-INSTAGRAM — 4 ta yagona raqam + joriy holat satrlari", () => {
     const panel = buildChannelStatsPanel(
       chan({}),
-      stats({ botToday: 1, botWeek: 4, botMonth: 9, botTotal: 12, currentBot: 11, memberCount: 500 })
+      stats({
+        botToday: 1,
+        botWeek: 4,
+        botMonth: 9,
+        botTotal: 12,
+        currentBot: 11,
+        memberCount: 500,
+      })
     );
-    expect(panel).toContain("Bugun: <b>1</b> · 7 kun: <b>4</b> · 30 kun: <b>9</b> · Jami: <b>12</b>");
+    expect(panel).toContain(
+      "Bugun: <b>1</b> · 7 kun: <b>4</b> · 30 kun: <b>9</b> · Jami: <b>12</b>"
+    );
     expect(panel).toContain("👥 Hozirgi a'zolar (Telegram): <b>500</b>");
     expect(panel).toContain("🤖 Bot orqali, hozir a'zoda: <b>11</b>");
     expect(panel).toContain("🤖 Bot: <b>0</b>");
@@ -261,12 +313,121 @@ describe("buildChannelStatsPanel", () => {
     expect(noLink).toContain("(havola yo'q)");
   });
 
-  it("sarlavha HTML'dan xavfsiz (escape qilinadi)", () => {
+  // ---- HAVOLA KESIMI (qisqacha satr) ----
+  it("havolalar soni va joriy havola natijasi ko'rsatiladi", () => {
     const panel = buildChannelStatsPanel(
-      chan({ title: 'A & B <b>x</b> "q"' }),
-      stats()
+      chan({ botInviteLink: "https://t.me/+yangi" }),
+      stats({ links: { count: 3, currentJoined: 12, currentRequests: 0 } })
     );
-    expect(panel).not.toContain('A & B <b>');
+    expect(panel).toContain("🧷 Havolalar: <b>3</b> ta · joriy havola orqali: <b>12</b>");
+    // Bittadan ko'p havola bor — eski havolalar qayerdan ko'rilishi aytiladi
+    expect(panel).toContain('"🔗 Havolalar"');
+  });
+
+  it("bitta havola bo'lsa — 'eski havolalar' izohi keraksiz", () => {
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ links: { count: 1, currentJoined: 5, currentRequests: 0 } })
+    );
+    expect(panel).toContain("🧷 Havolalar: <b>1</b> ta");
+    expect(panel).not.toContain("Eski havolalar kesimi");
+  });
+
+  it("so'rovli kanalda joriy havola ZAYIFKA soni bilan ko'rsatiladi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({ type: "REQUEST" }),
+      stats({
+        req: { today: 1, week: 2, month: 3, total: 3, approved: 0 },
+        links: { count: 2, currentJoined: 4, currentRequests: 300 },
+      })
+    );
+    expect(panel).toContain("joriy havola orqali: <b>300</b>");
+  });
+
+  it("havola ma'lumoti bo'lmasa satr umuman chiqmaydi (eski chaqiruvlar buzilmaydi)", () => {
+    const panel = buildChannelStatsPanel(chan({}), stats());
+    expect(panel).not.toContain("🧷 Havolalar");
+  });
+
+  // ---- "Bot orqali" dalil kesimi ----
+  it("qat'iy dalil va taxmin ALOHIDA ko'rsatiladi", () => {
+    // 862 tadan 850 tasi darvoza taxmini bo'lsa, adminni "hammasi bot xizmati"
+    // deb chalg'itmasligi kerak.
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ botTotal: 862, botSignal: { byLink: 12, byGate: 40, legacy: 810 } })
+    );
+    expect(panel).toContain("✅ Havola bilan tasdiqlangan: <b>12</b>");
+    expect(panel).toContain("🤔 Darvoza bo'yicha taxmin: <b>40</b>");
+    expect(panel).toContain("❔ Kuzatuvdan oldingi: <b>810</b>");
+    expect(panel).toContain("o'zi topib");
+  });
+
+  it("botSignal bo'lmasa blok chiqmaydi", () => {
+    const panel = buildChannelStatsPanel(chan({}), stats({ botTotal: 5 }));
+    expect(panel).not.toContain("Darvoza bo'yicha taxmin");
+  });
+
+  it("so'rovli kanalda ham dalil kesimi ko'rinadi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({ type: "REQUEST" }),
+      stats({
+        req: { today: 1, week: 2, month: 3, total: 3, approved: 0 },
+        botSignal: { byLink: 4, byGate: 9, legacy: 2 },
+      })
+    );
+    expect(panel).toContain("✅ Havola bilan tasdiqlangan: <b>4</b>");
+  });
+
+  // ---- Sog'liq bloki ----
+  it("nosozlik ENG TEPADA — raqamlardan oldin ko'rinadi", () => {
+    // Bot admin bo'lmasa raqamlar ahamiyatsiz: avval shuni ko'rish kerak.
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ botTotal: 500, health: { problems: ["bot admin emas"], healed: false } })
+    );
+    expect(panel).toContain("🚨 <b>NOSOZLIK:</b>");
+    expect(panel).toContain("• bot admin emas");
+    expect(panel.indexOf("NOSOZLIK")).toBeLessThan(panel.indexOf("Bot orqali qo'shilgan"));
+  });
+
+  it("avtomatik tuzatilgan bo'lsa shu ham aytiladi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ health: { problems: ["havola o'lik"], healed: true } })
+    );
+    expect(panel).toContain("✅ Havola avtomatik almashtirildi.");
+  });
+
+  it("muammo yo'q bo'lsa blok umuman chiqmaydi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ health: { problems: [], healed: false } })
+    );
+    expect(panel).not.toContain("NOSOZLIK");
+  });
+
+  it("sog'liq ma'lumoti umuman bo'lmasa ham panel buzilmaydi", () => {
+    const panel = buildChannelStatsPanel(chan({}), stats());
+    expect(panel).not.toContain("NOSOZLIK");
+    expect(panel).toContain("Bot orqali qo'shilgan");
+  });
+
+  it("nosozlik so'rovli kanalda ham ko'rinadi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({ type: "REQUEST" }),
+      stats({
+        req: { today: 0, week: 0, month: 0, total: 0, approved: 0 },
+        health: { problems: ["kanalga kirib bo'lmayapti"], healed: false },
+      })
+    );
+    expect(panel).toContain("🚨 <b>NOSOZLIK:</b>");
+    expect(panel).toContain("Zayifkalar");
+  });
+
+  it("sarlavha HTML'dan xavfsiz (escape qilinadi)", () => {
+    const panel = buildChannelStatsPanel(chan({ title: 'A & B <b>x</b> "q"' }), stats());
+    expect(panel).not.toContain("A & B <b>");
     expect(panel).toContain("A &amp; B");
   });
 });

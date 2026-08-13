@@ -206,42 +206,72 @@ model Channel {
   buttonLabel String?     // Obuna sahifasida ko'rsatiladigan maxsus yorliq
   createdAt   DateTime    @default(now())
 
-  joinRequests   JoinRequest[]
-  channelMembers ChannelMember[]
+  // DIQQAT: tarix jadvallariga (join_requests / channel_members /
+  // channel_invite_links / channel_events) ATAYLAB relatsiya yo'q.
+  //
+  // Ilgari ular `onDelete: Cascade` bilan bog'langan edi: kanal paneldan
+  // o'chirilsa zayifkalar, a'zolik snapshoti va havolalar registri ham
+  // o'chib ketardi, `channel_events` esa (FK'siz) tirik qolardi. Natijada
+  // kanal uzib-ulanganda statistika yolg'on ko'rsatardi — 13.08.2026 da
+  // "Русский язык" kanalida aynan shu bo'ldi: tarixda 832 odam, snapshotda 8.
+  //
+  // Endi hamma tarix `chatId` bo'yicha bog'lanadi va kanal o'chirilganda
+  // saqlanib qoladi — o'sha chatId qayta qo'shilsa avtomatik ulanadi.
 
   @@map("channels")
 }
 
+// ===================== TAKLIF HAVOLALARI TARIXI =====================
+// Bot yaratgan HAR BIR tracking havolasi shu yerda qoladi — havola yangilansa
+// eskisi o'chirilmaydi, `isCurrent=false` + `revokedAt` bilan belgilanadi.
+// Shu tufayli "eski havola orqali qancha, yangisi orqali qancha" ajratib
+// ko'rsatiladi (`channel_events.inviteLink` bo'yicha guruhlash).
+model ChannelInviteLink {
+  id        Int       @id @default(autoincrement())
+  channelId BigInt
+  link      String    @unique
+  seq       Int       @default(1) // kanal ichidagi tartib raqami: #1, #2, ...
+  name      String? // "bot_tracking" | "majburiy_obuna"
+  createdAt DateTime  @default(now())
+  revokedAt DateTime? // bekor qilingan vaqt (null = tirik)
+  isCurrent Boolean   @default(false) // shu turdagi (name) joriy havola
+
+  @@index([channelId, seq])
+  @@map("channel_invite_links")
+}
+
 // ===================== QO'SHILISH SO'ROVLARI (REQUEST kanallari) =====================
 model JoinRequest {
-  id        Int      @id @default(autoincrement())
-  channelId BigInt
-  userId    BigInt
-  firstName String?
-  username  String?
-  status    String   @default("pending") // pending | approved | declined
-  date      DateTime @default(now())
-
-  channel Channel @relation(fields: [channelId], references: [chatId], onDelete: Cascade)
+  id         Int      @id @default(autoincrement())
+  channelId  BigInt
+  userId     BigInt
+  firstName  String?
+  username   String?
+  status     String   @default("pending") // pending | approved | declined
+  inviteLink String? // zayifka QAYSI havola orqali kelgan (ChatJoinRequest.invite_link)
+  date       DateTime @default(now())
 
   @@unique([channelId, userId])
   @@index([channelId, date])
+  @@index([channelId, inviteLink])
   @@index([userId])
   @@map("join_requests")
 }
 
 // ===================== KANAL QO'SHILISH/CHIQISH HODISALARI (statistika) =====================
 model ChannelEvent {
-  id        Int      @id @default(autoincrement())
-  channelId BigInt
-  userId    BigInt
-  type      String   @default("join") // join | leave
-  source    String?  @default("unknown") // "bot" | "organic" | "unknown"
-  date      DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  channelId  BigInt
+  userId     BigInt
+  type       String   @default("join") // join | leave
+  source     String?  @default("unknown") // "bot" | "organic" | "unknown"
+  inviteLink String? // qo'shilishda ishlatilgan taklif havolasi (bo'lsa) — havola kesimi uchun
+  date       DateTime @default(now())
 
   @@index([channelId, date])
   @@index([date])
   @@index([channelId, source]) // bot/organic statistika uchun
+  @@index([channelId, inviteLink]) // havola kesimi uchun
   @@map("channel_events")
 }
 
@@ -252,17 +282,17 @@ model ChannelEvent {
 //  · source "bot" dan pastga TUSHIRILMAYDI (bir marta bot = doim bot)
 //  · leftAt NULL = hozir a'zo (chiqishda yoziladi)
 model ChannelMember {
-  id        Int      @id @default(autoincrement())
-  channelId BigInt
-  userId    BigInt
-  joinedAt  DateTime @default(now())
-  source    String   @default("unknown")
-  leftAt    DateTime?
-
-  channel Channel @relation(fields: [channelId], references: [chatId], onDelete: Cascade)
+  id         Int       @id @default(autoincrement())
+  channelId  BigInt
+  userId     BigInt
+  joinedAt   DateTime  @default(now())
+  source     String    @default("unknown")
+  inviteLink String? // oxirgi ma'lum taklif havolasi (null ustidan yozilmaydi)
+  leftAt     DateTime?
 
   @@unique([channelId, userId])
   @@index([channelId, source, joinedAt])
+  @@index([channelId, inviteLink])
   @@map("channel_members")
 }
 

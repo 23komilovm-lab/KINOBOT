@@ -56,6 +56,52 @@ export async function countDistinctJoinsBySource(
   return map;
 }
 
+/**
+ * "Bot orqali" sonini DALIL KUCHI bo'yicha ajratadi.
+ *
+ * `resolveJoinSource` "bot" yorlig'ini ikki xil yo'l bilan qo'yadi va ularning
+ * ishonchliligi TENG EMAS. Uchinchi guruh — kuzatuvdan oldingi yozuvlar:
+ *
+ *  · `byLink` — Telegram aynan bot yaratgan havolani qaytargan. QAT'IY dalil.
+ *  · `byGate` — Telegram havola bermagan (odam ommaviy kanalga @username yoki
+ *               qidiruv orqali kirgan), lekin unga shu kanal oxirgi 30 daqiqada
+ *               majburiy obuna sifatida ko'rsatilgan. Bu TAXMIN: odam kanalni
+ *               o'zi topib qo'shilgan bo'lishi ham mumkin.
+ *  · `legacy` — havola ustuni yozila boshlashidan OLDINGI yozuv. Qaysi yo'l
+ *               bilan kelgani ma'lum emas — taxmin deb ham, dalil deb ham
+ *               belgilash yolg'on bo'lardi.
+ */
+export async function countBotJoinsBySignal(
+  channelId: bigint,
+  range: ChannelStatsRange
+): Promise<{ byLink: number; byGate: number; legacy: number }> {
+  const cond = rangeConditions(range, "join");
+  // Kuzatuv boshlangan lahzani o'zimiz aniqlaymiz: havolasi yozilgan eng
+  // birinchi yozuv. Qattiq sanani kodga yozib qo'yish deploy vaqtiga bog'liq
+  // bo'lardi va noto'g'ri chegara berardi. Hech qanday havola yo'q bo'lsa —
+  // kuzatuv hali boshlanmagan, ya'ni hamma yozuv "legacy".
+  const rows = await prisma.$queryRaw<{ by_link: number; by_gate: number; legacy: number }[]>`
+    WITH cutoff AS (
+      SELECT COALESCE(MIN("date"), now()) AS t
+      FROM "channel_events" WHERE "inviteLink" IS NOT NULL
+    )
+    SELECT
+      COUNT(DISTINCT "userId") FILTER (WHERE e."inviteLink" IS NOT NULL)::int AS by_link,
+      COUNT(DISTINCT "userId") FILTER (
+        WHERE e."inviteLink" IS NULL AND e."date" >= (SELECT t FROM cutoff)
+      )::int AS by_gate,
+      COUNT(DISTINCT "userId") FILTER (
+        WHERE e."inviteLink" IS NULL AND e."date" < (SELECT t FROM cutoff)
+      )::int AS legacy
+    FROM "channel_events" e
+    WHERE e."channelId" = ${channelId} AND ${cond} AND e."source" = 'bot'`;
+  return {
+    byLink: rows[0]?.by_link ?? 0,
+    byGate: rows[0]?.by_gate ?? 0,
+    legacy: rows[0]?.legacy ?? 0,
+  };
+}
+
 /** Hozirgi vaqtda bot orqali qo'shilgan va hali kanalda turgan YAGONA a'zolar (churn-aware) */
 export async function currentBotMembers(channelId: bigint): Promise<number> {
   const rows = await prisma.$queryRaw<{ n: number }[]>`

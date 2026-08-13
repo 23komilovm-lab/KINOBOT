@@ -15,10 +15,24 @@ import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/sett
 import { buttonStyleLabel, resolveButtonStyle, isValidUrl } from "../../utils/contentButton.js";
 import { daysAgoStartUz } from "../../utils/dateRange.js";
 import {
+  countBotJoinsBySignal,
   countDistinctBotJoins,
   countDistinctJoinsBySource,
   currentBotMembers,
 } from "../../utils/channelStats.js";
+import {
+  buildInviteLinkPanel,
+  collectInviteLinkStats,
+  ensureInviteLinkRegistered,
+  markInviteLinkRevoked,
+  registerInviteLink,
+} from "../../utils/inviteLinks.js";
+import { rebuildMemberSnapshot } from "../../utils/channelEvents.js";
+import {
+  PROBLEM_LABEL,
+  checkChannelHealth,
+  getCachedHealth,
+} from "../../services/channelHealth.js";
 import { getCachedMemberCount, clearMemberCount } from "../../services/memberCountCache.js";
 import type { MyContext } from "../../types.js";
 import type { Channel, ChannelType } from "@prisma/client";
@@ -60,10 +74,7 @@ interface PendingChannel {
  * Bot tracking havolasini yaratadi yoki mavjudini qaytaradi.
  * Har kanal uchun faqat bitta "bot_tracking" nomli havola yaratiladi.
  */
-async function getOrCreateBotInviteLink(
-  ctx: MyContext,
-  chatId: bigint
-): Promise<string | null> {
+async function getOrCreateBotInviteLink(ctx: MyContext, chatId: bigint): Promise<string | null> {
   // Avval DB dan tekshiramiz
   const ch = await prisma.channel.findUnique({
     where: { chatId },
@@ -86,6 +97,9 @@ async function getOrCreateBotInviteLink(
       where: { chatId },
       data: { botInviteLink: link.invite_link },
     });
+    // Havolalar tarixiga yozamiz — keyin yangilansa ham shu havolaning
+    // statistikasi alohida ko'rinib turadi.
+    await registerInviteLink(chatId, link.invite_link, "bot_tracking");
     return link.invite_link;
   } catch (err) {
     // Botda can_invite_users huquqi yo'qligi mumkin
@@ -227,6 +241,23 @@ export interface ChannelStatsData {
    * uchun asosiy ko'rsatkich "qo'shilgan" emas, ZAYIFKA soni bo'lishi kerak.
    */
   req?: { today: number; week: number; month: number; total: number; approved: number };
+  /**
+   * Havola kesimining QISQACHA xulosasi. To'liq ro'yxat "🔗 Havolalar" ekranida
+   * (`buildInviteLinkPanel`) — bu yerda faqat "havola yangilangan/yangilanmagan"
+   * va joriy havola natijasi ko'rinadi, panel cho'zilib ketmasin.
+   */
+  links?: { count: number; currentJoined: number; currentRequests: number };
+  /**
+   * "Bot orqali" sonining dalil kesimi: `byLink` — Telegram bot havolasini
+   * qaytargan (qat'iy), `byGate` — havola ma'lum emas, darvoza sessiyasi
+   * bo'yicha taxmin qilingan. Jami `botTotal` ga teng bo'lishi kerak.
+   */
+  botSignal?: { byLink: number; byGate: number; legacy: number };
+  /**
+   * Sog'liq tekshiruvi natijasi — muammolar TAYYOR MATN ko'rinishida
+   * (`PROBLEM_LABEL` bilan yechilgan), shunda panel quruvchisi sof qoladi.
+   */
+  health?: { problems: string[]; healed: boolean };
 }
 
 /**
@@ -235,7 +266,9 @@ export interface ChannelStatsData {
  * adashtirmaslik uchun bitta "Noma'lum" bucket'ga birlashtiriladi (faqat ko'rsatish,
  * saqlangan ma'lumot o'zgarmaydi). Sof funksiya — test qilish oson.
  */
-export function mergeSourceBuckets(sourceMap: ReadonlyMap<string, number>): ChannelStatsData["source"] {
+export function mergeSourceBuckets(
+  sourceMap: ReadonlyMap<string, number>
+): ChannelStatsData["source"] {
   const out: ChannelStatsData["source"] = { bot: 0, link: 0, request: 0, folder: 0, unknown: 0 };
   for (const [k, v] of sourceMap) {
     if (k === "direct" || k === "unknown") out.unknown += v;
@@ -247,11 +280,22 @@ export function mergeSourceBuckets(sourceMap: ReadonlyMap<string, number>): Chan
 /** Panel matnini sof quruvchi. Alohida export — vitest'da Telegram/DB siz test qilish mumkin. */
 export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string {
   const handle = c.username ? `@${c.username}` : (c.inviteLink ?? "(havola yo'q)");
+
+  // Nosozlik ENG TEPADA. Bot admin bo'lmasa yoki havola o'lik bo'lsa raqamlar
+  // ahamiyatsiz — avval shuni ko'rish kerak.
+  const healthBlock =
+    s.health && s.health.problems.length > 0
+      ? `\n\n🚨 <b>NOSOZLIK:</b>\n` +
+        s.health.problems.map((p) => `  • ${p}`).join("\n") +
+        (s.health.healed ? `\n  ✅ Havola avtomatik almashtirildi.` : "")
+      : "";
+
   const header =
     `<tg-emoji emoji-id="${BE.channel}">📢</tg-emoji> <b>${e.escapeHtml(c.title)}</b>\n` +
     `Tur: <b>${TYPE_LABEL[c.type]}</b>\n` +
     `<code>${e.escapeHtml(handle)}</code>\n` +
-    `Majburiy obuna: <b>${c.isActive ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>`;
+    `Majburiy obuna: <b>${c.isActive ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>` +
+    healthBlock;
 
   // Instagram/boshqa — a'zolik API orqali tekshirilmaydi (sintetik salbiy chatId
   // uchun chat_member hech qachon kelmaydi) → ma'nosiz "0" statistika emas.
@@ -264,6 +308,29 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
   const linkLine = c.botInviteLink
     ? `\n🔗 Tracking havolasi: <code>${e.escapeHtml(c.botInviteLink)}</code>`
     : `\n⚠️ Tracking havolasi yo'q — "♻️ Yangi havola" tugmasini bosing.`;
+
+  // Havola kesimi qisqacha: havola bir necha marta yangilangan bo'lsa, admin
+  // shu yerdan bilib, to'liq taqsimotni "🔗 Havolalar" ekranida ko'radi.
+  const linkStatsLine = s.links
+    ? `\n🧷 Havolalar: <b>${s.links.count}</b> ta · joriy havola orqali: <b>` +
+      `${c.type === "REQUEST" ? s.links.currentRequests : s.links.currentJoined}</b>` +
+      (s.links.count > 1 ? `\n<i>Eski havolalar kesimi — "🔗 Havolalar" tugmasida.</i>` : "")
+    : "";
+
+  // "Bot orqali" raqamining DALIL kesimi. Ikki yo'l bir xil yorliq oladi, lekin
+  // ishonchliligi teng emas — adminni chalg'itmaslik uchun ajratib ko'rsatamiz.
+  const botSignalBlock = s.botSignal
+    ? `\n\n🔬 <b>"Bot orqali" qanchalik aniq:</b>\n` +
+      `  ✅ Havola bilan tasdiqlangan: <b>${s.botSignal.byLink}</b>\n` +
+      `  🤔 Darvoza bo'yicha taxmin: <b>${s.botSignal.byGate}</b>\n` +
+      `  ❔ Kuzatuvdan oldingi: <b>${s.botSignal.legacy}</b>\n` +
+      `<i>"Taxmin" — Telegram havolani aytmagan (odam ommaviy kanalga @username ` +
+      `yoki qidiruv orqali kirgan), lekin unga shu kanal oxirgi 30 daqiqada ` +
+      `majburiy obuna sifatida ko'rsatilgan. Bunday odam kanalni o'zi topib ` +
+      `qo'shilgan bo'lishi ham mumkin — uni bot xizmati deb to'liq hisoblab ` +
+      `bo'lmaydi. "Kuzatuvdan oldingi" — havola ustuni yozila boshlashidan ` +
+      `avvalgi yozuvlar, qaysi yo'l bilan kelgani umuman ma'lum emas.</i>`
+    : "";
 
   // SO'ROVLI KANAL — butunlay boshqa hisob.
   //
@@ -289,7 +356,9 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
       `<i>Zayifka yuborgan odam guruhga hali KIRMAGAN — tasdiqlashni kutyapti. ` +
       `"Kuzatuv tasdiqlagan" faqat 09.08.2026 dan beri yozilyapti, shuning uchun ` +
       `jami zayifkadan kam ko'rinadi.</i>` +
-      linkLine
+      botSignalBlock +
+      linkLine +
+      linkStatsLine
     );
   }
 
@@ -308,16 +377,27 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
     `  ❔ Noma'lum: <b>${s.source.unknown}</b>\n` +
     `<i>"Noma'lum" — eski yozuvlar yoki Telegram manba bermagan holat. ` +
     `Kuzatuvdan oldingi qo'shilishlar ham shu yerga kiradi.</i>` +
-    linkLine
+    botSignalBlock +
+    linkLine +
+    linkStatsLine
   );
 }
 
-async function renderChannelDetail(ctx: MyContext, id: number) {
+async function renderChannelDetail(ctx: MyContext, id: number, opts: { recheck?: boolean } = {}) {
   const c = await prisma.channel.findUnique({ where: { id } });
   if (!c) {
     await ctx.answerCallbackQuery({ text: "Kanal topilmadi.", show_alert: true });
     return;
   }
+
+  // Sog'liq: odatda davriy sweep keshidan olinadi (panel tez ochilsin).
+  // "🔄 Yangilash" bosilganda yangidan tekshiriladi.
+  const rawHealth = opts.recheck
+    ? await checkChannelHealth(ctx.api, c, ctx.me.id, { autoHeal: true })
+    : getCachedHealth(c.chatId);
+  const health = rawHealth
+    ? { problems: rawHealth.problems.map((p) => PROBLEM_LABEL[p]), healed: rawHealth.healed }
+    : undefined;
 
   // INSTAGRAM: statistika umuman hisoblanmaydi (ma'nosiz "0" ko'rinmasin).
   let statsData: ChannelStatsData = {
@@ -339,19 +419,29 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
     const week = daysAgoStartUz(6);
     const month = daysAgoStartUz(29);
 
-    const [botToday, botWeek, botMonth, botTotal, currentBot, memberCount, sourceMap, reqPending] =
-      await Promise.all([
-        countDistinctBotJoins(c.chatId, { gte: today }),
-        countDistinctBotJoins(c.chatId, { gte: week }),
-        countDistinctBotJoins(c.chatId, { gte: month }),
-        countDistinctBotJoins(c.chatId, null),
-        currentBotMembers(c.chatId),
-        getCachedMemberCount(ctx.api, c.chatId),
-        countDistinctJoinsBySource(c.chatId, null),
-        c.type === "REQUEST"
-          ? prisma.joinRequest.count({ where: { channelId: c.chatId, status: "pending" } })
-          : Promise.resolve(0),
-      ]);
+    const [
+      botToday,
+      botWeek,
+      botMonth,
+      botTotal,
+      currentBot,
+      memberCount,
+      sourceMap,
+      reqPending,
+      botSignal,
+    ] = await Promise.all([
+      countDistinctBotJoins(c.chatId, { gte: today }),
+      countDistinctBotJoins(c.chatId, { gte: week }),
+      countDistinctBotJoins(c.chatId, { gte: month }),
+      countDistinctBotJoins(c.chatId, null),
+      currentBotMembers(c.chatId),
+      getCachedMemberCount(ctx.api, c.chatId),
+      countDistinctJoinsBySource(c.chatId, null),
+      c.type === "REQUEST"
+        ? prisma.joinRequest.count({ where: { channelId: c.chatId, status: "pending" } })
+        : Promise.resolve(0),
+      countBotJoinsBySignal(c.chatId, null),
+    ]);
 
     // So'rovli kanalda asosiy metrika — zayifka soni (yuqoridagi izohga qarang).
     // `joinRequest.date` bo'yicha, kanal statistikasi bilan bir xil Toshkent oynalari.
@@ -368,6 +458,10 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
       req = { today: rToday, week: rWeek, month: rMonth, total: rTotal, approved: rApproved };
     }
 
+    // Havola kesimi — qisqacha xulosa (to'liq ro'yxat "🔗 Havolalar" ekranida).
+    const linkStats = await collectInviteLinkStats(c.chatId, c.type === "REQUEST");
+    const current = linkStats.rows.find((r) => r.isCurrent && r.name === "bot_tracking");
+
     // `direct` va `unknown` — ikkalasi ham "Telegram/tegishli manba bermagan" degani.
     // Adashtirmaslik uchun bitta "Noma'lum" bucket'ga birlashtiriladi (faqat ko'rsatish).
     statsData = {
@@ -380,6 +474,13 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
       reqPending,
       source: mergeSourceBuckets(sourceMap),
       req,
+      links: {
+        count: linkStats.rows.length,
+        currentJoined: current?.joined ?? 0,
+        currentRequests: current?.requests ?? 0,
+      },
+      botSignal,
+      health,
     };
   }
 
@@ -396,7 +497,10 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
     [ibtn("✏️ Yorliqni tahrirlash", `ch:editlabel:${c.id}`, "primary")],
   ];
   if (c.type !== "INSTAGRAM") {
-    rows.push([ibtn("🔄 Yangilash", `ch:refresh:${c.id}`, "primary")]);
+    rows.push([
+      ibtn("🔄 Yangilash", `ch:refresh:${c.id}`, "primary"),
+      ibtn("🔗 Havolalar", `ch:links:${c.id}`, "success"),
+    ]);
     rows.push([
       ibtn("♻️ Yangi havola", `ch:newlink:${c.id}`, "primary"),
       ibtn("📎 Havolani ulash", `ch:setlink:${c.id}`, "primary"),
@@ -405,7 +509,9 @@ async function renderChannelDetail(ctx: MyContext, id: number) {
   if (c.type === "REQUEST") {
     rows.push([ibtn("📋 So'rovlarni boshqarish", "ch:jrstats", "primary")]);
   }
-  rows.push([ibtn("🗑 O'chirish", `ch:delconf:${c.id}`, "danger", BE.chDelete)]);
+  // O'CHIRISH TUGMASI BU YERDA ATAYLAB YO'Q. Statistikani ko'rish oqimida
+  // "danger" tugma yonma-yon turishi tasodifiy bosishga olib keladi. O'chirish
+  // faqat "Kanal boshqaruvi → O'chirish" menyusi orqali (ch:del → ch:delconf).
   rows.push([ibtn("Orqaga", "ch:list", undefined, BE.backMenu)]);
 
   await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
@@ -416,14 +522,49 @@ channelsHandler.callbackQuery(/^ch:view:(\d+)$/, async (ctx) => {
   await renderChannelDetail(ctx, Number(ctx.match[1]));
 });
 
+// ============ HAVOLALAR KESIMI (eski/yangi havola alohida) ============
+async function renderInviteLinks(ctx: MyContext, id: number) {
+  const c = await prisma.channel.findUnique({ where: { id } });
+  if (!c || c.type === "INSTAGRAM") {
+    await ctx.answerCallbackQuery({ text: "Kanal topilmadi.", show_alert: true });
+    return;
+  }
+  // Registrga tushmay qolgan joriy havolani shu yerda tuzatamiz — aks holda u
+  // "registrdan tashqari" bo'lib ko'rinardi.
+  if (c.botInviteLink) await ensureInviteLinkRegistered(c.chatId, c.botInviteLink, "bot_tracking");
+  if (c.inviteLink) await ensureInviteLinkRegistered(c.chatId, c.inviteLink, "majburiy_obuna");
+
+  const stats = await collectInviteLinkStats(c.chatId, c.type === "REQUEST");
+  const text = buildInviteLinkPanel(c.title, c.type === "REQUEST", stats);
+
+  await ctx
+    .editMessageText(text, {
+      link_preview_options: { is_disabled: true },
+      reply_markup: kb(
+        [
+          ibtn("🔄 Yangilash", `ch:links:${id}`, "primary"),
+          ibtn("♻️ Yangi havola", `ch:newlink:${id}:links`, "success"),
+        ],
+        [ibtn("Orqaga", `ch:view:${id}`, undefined, BE.backMenu)]
+      ),
+    })
+    .catch(() => {});
+}
+
+channelsHandler.callbackQuery(/^ch:links:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await renderInviteLinks(ctx, Number(ctx.match[1]));
+});
+
 channelsHandler.callbackQuery(/^ch:refresh:(\d+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "🔄 Yangilanmoqda..." });
+  await ctx.answerCallbackQuery({ text: "🔄 Tekshirilmoqda..." });
   const id = Number(ctx.match[1]);
   const c = await prisma.channel.findUnique({ where: { id }, select: { chatId: true } });
   if (!c) return;
   // A'zo-soni keshi bypass — Telegram'dan yangi qiymat olinadi.
   clearMemberCount(c.chatId);
-  await renderChannelDetail(ctx, id);
+  // Sog'liq ham yangidan tekshiriladi (kesh emas) — admin aynan shuni kutadi.
+  await renderChannelDetail(ctx, id, { recheck: true });
 });
 
 // Har bir kanal uchun alohida majburiy obuna toggle (popup bilan)
@@ -474,10 +615,15 @@ channelsHandler.callbackQuery("ch:editlabel:cancel", async (ctx) => {
 // Statistika "bot orqali qo'shilgan" ni havolani KIM yaratganiga qarab sanaydi
 // (index.ts: creator.id === bot.id), shuning uchun yangi havola yaratilsa ham
 // eskisi bilan kelganlar yo'qolmaydi — ikkalasi ham botniki.
+//
+// Bundan tashqari har bir havola `channel_invite_links` registrida qoladi va
+// qo'shilish yozuvlarida aynan qaysi havola ishlatilgani saqlanadi — shu tufayli
+// "eski havola orqali qancha, yangisi orqali qancha" ajratib ko'rsatiladi.
 
-/** Yangi "bot_tracking" havolasi yaratadi va DB'ga yozadi (eskisini bekor qilmaydi) */
-channelsHandler.callbackQuery(/^ch:newlink:(\d+)$/, async (ctx) => {
+/** Yangi "bot_tracking" havolasi yaratadi, eskisini bekor qiladi (registrda qoladi) */
+channelsHandler.callbackQuery(/^ch:newlink:(\d+)(:links)?$/, async (ctx) => {
   const id = Number(ctx.match[1]);
+  const backToLinks = !!ctx.match[2];
   const ch = await prisma.channel.findUnique({ where: { id } });
   if (!ch || ch.type === "INSTAGRAM") {
     await ctx.answerCallbackQuery({ text: "Topilmadi.", show_alert: true });
@@ -496,16 +642,19 @@ channelsHandler.callbackQuery(/^ch:newlink:(\d+)$/, async (ctx) => {
     // havola satri bo'yicha emas, havolani KIM yaratgani bo'yicha ishlaydi.
     if (ch.botInviteLink) {
       await ctx.api.revokeChatInviteLink(Number(ch.chatId), ch.botInviteLink).catch(() => null);
+      await markInviteLinkRevoked(ch.botInviteLink);
     }
     await prisma.channel.update({
       where: { id },
       data: { botInviteLink: link.invite_link },
     });
+    // Registrga #N bo'lib tushadi — eski qatorlar o'chirilmaydi.
+    await registerInviteLink(ch.chatId, link.invite_link, "bot_tracking");
     await ctx.answerCallbackQuery({
       text:
         ch.type === "REQUEST"
-          ? "✅ Yangi havola yaratildi (tasdiqlash talab qiladi). Eskisi bekor qilindi."
-          : "✅ Yangi havola yaratildi. Eskisi bekor qilindi.",
+          ? "✅ Yangi havola yaratildi (tasdiqlash talab qiladi). Eskisi bekor qilindi — statistikasi saqlanadi."
+          : "✅ Yangi havola yaratildi. Eskisi bekor qilindi — statistikasi saqlanadi.",
     });
   } catch (err) {
     await ctx.answerCallbackQuery({
@@ -514,7 +663,8 @@ channelsHandler.callbackQuery(/^ch:newlink:(\d+)$/, async (ctx) => {
     });
     return;
   }
-  await renderChannelDetail(ctx, id);
+  if (backToLinks) await renderInviteLinks(ctx, id);
+  else await renderChannelDetail(ctx, id);
 });
 
 /** Mavjud havolani ulash — faqat BOT yaratgan havola qabul qilinadi */
@@ -805,7 +955,11 @@ channelsHandler.on("message", async (ctx, next) => {
       );
       return;
     }
+    if (ch.botInviteLink && ch.botInviteLink !== msgText) {
+      await markInviteLinkRevoked(ch.botInviteLink);
+    }
     await prisma.channel.update({ where: { id: setLinkId }, data: { botInviteLink: msgText } });
+    await registerInviteLink(ch.chatId, msgText, "bot_tracking");
     ctx.session.scratch = {};
     await ctx.reply(
       `${ce("check")} Tracking havolasi ulandi:\n<code>${e.escapeHtml(msgText)}</code>`
@@ -1094,10 +1248,9 @@ async function finishAddChannel(
   if (limit !== null) {
     const count = await prisma.channel.count();
     if (count >= limit) {
-      await ctx.reply(
-        `❌ Siz maksimal <b>${limit}</b> ta kanal qo'sha olasiz. Limit to'ldi.`,
-        { reply_markup: { remove_keyboard: true } }
-      );
+      await ctx.reply(`❌ Siz maksimal <b>${limit}</b> ta kanal qo'sha olasiz. Limit to'ldi.`, {
+        reply_markup: { remove_keyboard: true },
+      });
       const { text, markup } = await channelMenuData();
       await ctx.reply(text, { reply_markup: markup });
       return;
@@ -1142,9 +1295,21 @@ async function finishAddChannel(
     return;
   }
 
+  // QAYTA ULANISH: bu chatId ilgari qo'shilib, keyin o'chirilgan bo'lishi
+  // mumkin. `channel_events` o'sha paytdan omon qolgan, `channel_members` esa
+  // (eski cascade tufayli) yo'q bo'lishi mumkin — snapshotni jurnaldan
+  // tiklaymiz, aks holda panel "hozir a'zo: 0" deb yolg'on ko'rsatadi.
+  let restored = 0;
+  if (type !== "INSTAGRAM") {
+    restored = await rebuildMemberSnapshot(finalChatId);
+  }
+
   // Bot tracking havolasini yaratamiz (INSTAGRAM uchun emas)
   let botInviteLink: string | null = null;
   if (type !== "INSTAGRAM") {
+    // Zaxira havola (obuna tugmasi tracking havolasi bo'lmaganda shuni beradi)
+    // ham registrga tushsin — u orqali kelganlar ham havola kesimida ko'rinadi.
+    if (inviteLink) await registerInviteLink(finalChatId, inviteLink, "majburiy_obuna");
     botInviteLink = await getOrCreateBotInviteLink(ctx, BigInt(chatId));
   }
 
@@ -1153,12 +1318,15 @@ async function finishAddChannel(
       (type === "INSTAGRAM"
         ? `📸 ${e.escapeHtml(inviteLink ?? "")}`
         : username
-        ? `@${e.escapeHtml(username)}`
-        : inviteLink
-        ? e.escapeHtml(inviteLink)
-        : "") +
+          ? `@${e.escapeHtml(username)}`
+          : inviteLink
+            ? e.escapeHtml(inviteLink)
+            : "") +
       (botInviteLink ? `\n🔗 Bot tracking: <code>${e.escapeHtml(botInviteLink)}</code>` : "") +
-      `\nTur: <b>${type}</b>`,
+      `\nTur: <b>${type}</b>` +
+      (restored > 0
+        ? `\n\n♻️ Bu kanal ilgari ham qo'shilgan ekan — <b>${restored}</b> ta a'zolik yozuvi tarixdan tiklandi.`
+        : ""),
     { reply_markup: { remove_keyboard: true } }
   );
   const { text, markup } = await channelMenuData();
@@ -1188,15 +1356,22 @@ channelsHandler.callbackQuery(/^ch:delconf:(\d+)$/, async (ctx) => {
     // Tracking havolasi kanalda yetim qolmasin: kanal qayta qo'shilsa yangisi
     // yaratiladi va eskisi bilan kirganlar hamon "bot" deb sanaladi (creator
     // bo'yicha), lekin ishlatilmaydigan havolalar to'planib qolishi shart emas.
+    // Registrda esa havola O'CHIRILMAYDI — faqat "bekor qilingan" deb
+    // belgilanadi, uning statistikasi kanal qayta qo'shilganda ham ko'rinsin.
     if (ch?.botInviteLink) {
-      await ctx.api
-        .revokeChatInviteLink(Number(ch.chatId), ch.botInviteLink)
-        .catch(() => null);
+      await ctx.api.revokeChatInviteLink(Number(ch.chatId), ch.botInviteLink).catch(() => null);
+      await markInviteLinkRevoked(ch.botInviteLink);
     }
+    // TARIX SAQLANADI: zayifkalar, a'zolik snapshoti, havolalar registri va
+    // hodisalar jurnali `chatId` ga bog'langan va cascade YO'Q — shu chatId
+    // qayta qo'shilsa hammasi avtomatik ulanadi (20260813 migratsiyasi).
     await prisma.channel.delete({ where: { id } });
     // O'chirilgan kanalning a'zo-soni keshida eski qiymat qolib ketmasin.
     if (ch) clearMemberCount(ch.chatId);
-    await ctx.answerCallbackQuery({ text: "✅ O'chirildi", show_alert: true });
+    await ctx.answerCallbackQuery({
+      text: "✅ O'chirildi.\n\nStatistika tarixi saqlanadi — bu kanalni qayta qo'shsangiz raqamlar tiklanadi.",
+      show_alert: true,
+    });
     await renderChannelList(ctx);
   } catch (err) {
     await ctx.answerCallbackQuery({

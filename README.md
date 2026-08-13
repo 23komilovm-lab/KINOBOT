@@ -139,6 +139,67 @@ Lokal `npm run dev` **Railway'dagi bot bilan parallel** ishlasa, Telegram pollin
 1. `📺 Serial boshqaruvi` → `➕ Serial qo'shish` (kod, nom)
 2. So'ng `🎞 Qism qo'shish` → serial kodi → sezon → qism → video.
 
+### Kanal havolalari statistikasi
+
+`📢 Kanal boshqaruvi → Ro'yxat → kanal → 🔗 Havolalar` — **har bir taklif havolasi
+alohida** hisoblanadi: qo'shilgan yagona odamlar, shundan hozir a'zoda turganlar,
+so'rovli kanalda esa zayifka soni (kutayotgan/tasdiqlangan).
+
+`♻️ Yangi havola` bosilganda eski havola Telegram'da bekor qilinadi, lekin
+`channel_invite_links` registrida **qoladi** — shu tufayli "eski havola orqali
+qancha, yangisi orqali qancha" ajratib ko'rinadi (`#1`, `#2`, … tartib raqamlari).
+
+### Kanal sog'ligi (avtomatik kuzatuv)
+
+Uchta nosozlik botni **butunlay ishlamas qiladi va hech qanday xato bermaydi**:
+bot kanaldan chiqarilsa, admin huquqidan mahrum bo'lsa, yoki tracking havolasi
+qo'lda bekor qilinsa. Birinchi ikkisida `getChatMember` yiqiladi va
+[subscription.ts:98](src/utils/subscription.ts#L98) uni `catch(() => null)` bilan
+yutib, natijani «obuna emas» deb hisoblaydi — ya'ni **haqiqiy a'zolar ham
+darvozada bloklanadi**.
+
+`services/channelHealth.ts` har **30 daqiqada** barcha faol kanallarni
+tekshiradi:
+
+| Tekshiruv | Usul |
+| --- | --- |
+| Kanal mavjudmi | `getChat` |
+| Bot admin va huquqlari joyidami | `getChatMember(bot)` → `can_invite_users` |
+| Tracking havolasi tirikmi | `editChatInviteLink` (faqat bot yaratgan va tirik havolani tahrirlaydi) |
+
+Holat **o'zgarganda** egaga Telegram orqali xabar boradi (oxirgi holat `Setting`
+jadvalida — redeploy takroriy ogohlantirish yubormaydi). O'lik havola
+**avtomatik almashtiriladi**, eskisi registrda `revokedAt` bilan qoladi.
+
+⚠️ Tiriklik probasida `creates_join_request` uzatilishi **shart** — Telegram
+ko'rsatilmagan ixtiyoriy maydonlarni standart qiymatga qaytaradi, ya'ni uni
+tushirib qoldirish so'rovli kanal havolasini «tasdiqlashsiz» qilib qo'yadi.
+
+Natija kanal panelida eng tepada ko'rinadi; `🔄 Yangilash` yangidan tekshiradi.
+
+### Kanalni o'chirish va qayta ulash
+
+Kanal o'chirilganda **statistika tarixi saqlanadi**. Zayifkalar, a'zolik
+snapshoti, havolalar registri va hodisalar jurnali `chatId` ga bog'langan va
+ularda `ON DELETE CASCADE` **yo'q** — o'sha chatId qayta qo'shilsa hammasi
+avtomatik ulanadi.
+
+Ilgari cascade bor edi va uzib-ulash raqamlarni buzardi (13.08.2026 prod:
+`Русский язык` — tarixda 832 yagona odam, snapshotda 8 ta). Cascade'dan oldin
+o'chirilgan kanallar uchun `finishAddChannel` qo'shish paytida
+`rebuildMemberSnapshot()` ni chaqiradi — snapshot `channel_events` jurnalidan
+qayta quriladi (idempotent: jonli yozuvlar ustidan yozilmaydi).
+
+O'chirish tugmasi **faqat** `Kanal boshqaruvi → O'chirish` menyusida. Kanal
+statistikasi sahifasida u ataylab yo'q — tasodifan bosilmasin.
+
+Atributsiya `channel_events.inviteLink` / `join_requests.inviteLink` ustunlariga
+tayanadi — Telegram `chat_member` va `chat_join_request` yangilanishlarida bergan
+aynan o'sha havola satri. Havola kesimi **13.08.2026** dan beri yozilyapti; undan
+oldingi qo'shilishlar va havolasiz (ommaviy kanalga `@username` orqali) kirganlar
+panelda alohida **"Havola aniqlanmagan"** qatorida ko'rsatiladi — sun'iy
+taqsimlanmaydi.
+
 ## 💰 Kvota va monetizatsiya sozlamalari
 
 `Bot sozlamalari → ⭐ Premium` bo'limida (yoki DB `Setting` jadvali orqali):
