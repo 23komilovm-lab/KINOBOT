@@ -305,6 +305,35 @@ taqsimlanmaydi.
 | `free_daily_limit`      | **Kunlik** bepul kino so'rovlari (`0` = o'chirilgan; **Toshkent kuni** — UTC+5) |
 | `free_ai_limit`         | Bepul kunlik AI so'rovlari (`0` = cheksiz)                   |
 
+### Obunadan keyin so'rovni davom ettirish
+
+Majburiy obuna bloklaganda foydalanuvchi **nima so'ragani** eslab qolinadi
+(`utils/pendingAction.ts` → sessiya), «Tekshirish» bosilgach esa
+`services/resumeAction.ts` uni qayta bajaradi:
+
+| Amal | Qayta bajarilishi |
+| --- | --- |
+| Kino/serial **kodi** | o'sha kod yetkaziladi |
+| **Nom** bilan qidiruv | o'sha so'rov bo'yicha natijalar |
+| **AI** (va seed so'rov) | AI ochiladi, seed so'rovga javob beradi |
+| `/mashhur`, `/recommend` | ro'yxat ochiladi |
+| `/random` | **yangi** tasodifiy kino (aniq kod emas — foydalanuvchi tasodifiy so'ragan) |
+| Serial **qismi** | o'sha qism yuboriladi |
+
+Ikkita qoida:
+
+- Amal FAQAT `reason === "sub"` da saqlanadi. Kvota/premium bloklaganda premium
+  taklifi ko'rsatiladi va o'sha oqim o'z ishini qiladi — amalni qayta bajarish
+  foydalanuvchini yana o'sha devorga urardi.
+- `takePendingAction()` o'qigach **darhol o'chiradi**. Qayta bajarish yana
+  bloklansa (obuna o'rtasida bepul limit tugagan bo'lishi mumkin) o'sha oqim
+  o'zi qayta saqlaydi; aks holda amal sessiyada abadiy qolib, har «Tekshirish»
+  da takrorlanaverardi.
+
+Modullar ataylab ajratilgan: **saqlash** sof `utils/pendingAction.ts` da (uni
+hamma import qila oladi), **qayta bajarish** esa `services/resumeAction.ts` da
+(u handler'larni import qiladi). Teskari yo'nalish yo'q — halqa hosil bo'lmaydi.
+
 **Qanday ishlaydi:** barcha yetkazish yo'llari (kod, nom qidiruv, `movie:`/`serial:` callback, serial episod, AI `[SEND:]`, inline, `sub:check` qayta yetkazish) **bitta** `delivery.ts` gate'idan o'tadi. Gate `sub → quota → premium` tartibida tekshiradi, faqat muvaffaqiyatli yetkazilganda hisoblaydi va `views` ni oshiradi. Serial **episod = bitta so'rov**. Premium foydalanuvchi kvota qatlamini umuman ko'rmaydi.
 
 Tariflar (`1 oy / 3 oy / 6 oy / 1 yil`) `prisma.tariff` jadvalida — premium bo'limidan boshqariladi (karta + Stars).
@@ -330,6 +359,7 @@ src/
 ├── bot.ts                  # bot + session + conversations
 ├── services/
 │   ├── delivery.ts         # YAGONA yetkazish yo'li (gate + send + views + recordWatch)
+│   ├── resumeAction.ts     # obunadan keyin avvalgi so'rovni qayta bajarish
 │   ├── search.ts           # 3 bosqichli aqlli qidiruv
 │   ├── recommend.ts        # janr affiniteti + weighted random
 │   ├── serialProgress.ts   # SerialWatch progress ("Davom etish")

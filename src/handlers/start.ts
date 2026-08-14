@@ -11,6 +11,7 @@ import { attachReferrer } from "../utils/referral.js";
 import { sendReferralInfo } from "./referral.js";
 import { weightedRandomMovie } from "../services/recommend.js";
 import { deliverByCode, deliverMovie } from "../services/delivery.js";
+import { resumePendingAction } from "../services/resumeAction.js";
 import { sendPremiumPrompt } from "./premiumUser.js";
 import type { MyContext } from "../types.js";
 
@@ -93,8 +94,8 @@ startHandler.command("start", async (ctx) => {
   }
 
   // Deep-link kino — to'liq gate (obuna → bepul limit → premium) delivery.ts ichida.
-  // Gate o'tmasa bloklovchi xabar ko'rsatiladi; obuna bo'lsa pendingCode saqlanadi
-  // (sub:check qayta yetkazadi). Kod topilmasa — welcome ko'rsatiladi.
+  // Gate o'tmasa bloklovchi xabar ko'rsatiladi; obuna bloklasa kod eslab
+  // qolinadi (sub:check qayta yetkazadi). Kod topilmasa — welcome.
   if (pendingCode !== null) {
     const res = await deliverByCode(ctx, pendingCode);
     if (res.delivered) return;
@@ -110,7 +111,10 @@ startHandler.callbackQuery(/^sub:join:(-?\d+)$/, async (ctx) => {
   const channelId = BigInt(ctx.match[1]);
 
   // Sessionga "bot orqali" eslab qolamiz
-  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pendingSubscriptionChannel: channelId.toString() };
+  ctx.session.scratch = {
+    ...(ctx.session.scratch ?? {}),
+    pendingSubscriptionChannel: channelId.toString(),
+  };
 
   // Kanal URL ni topib, answerCallbackQuery bilan ochamiz
   const ch = await prisma.channel.findUnique({ where: { chatId: channelId } });
@@ -154,20 +158,17 @@ startHandler.callbackQuery("sub:check", async (ctx) => {
       if (ctx.session.scratch) delete ctx.session.scratch.pendingSubscriptionChannel;
     }
 
-    // Obuna oldidan so'ralgan kino/serial bo'lsa — to'liq gate QAYTA ishlaydi
-    // (obuna o'rtasida bepul limit tugagan bo'lishi mumkin). Kvota bloklasa
-    // pendingCode qayta saqlanadi va premium taklifi ko'rsatiladi.
-    const pending = ctx.session.scratch?.pendingCode as number | undefined;
-    if (typeof pending === "number") {
-      if (ctx.session.scratch) delete ctx.session.scratch.pendingCode;
-      const res = await deliverByCode(ctx, pending);
-      if (res.delivered) return;
-      if (!res.ok) return;
-    }
+    // Obuna oldidan nima so'ralgan bo'lsa — o'shani QAYTA bajaramiz: kino kodi,
+    // nom bilan qidiruv, AI, tavsiyalar, mashhurlar, tasodifiy kino, serial
+    // qismi. Darvoza qayta ishlaydi (obuna o'rtasida bepul limit tugagan
+    // bo'lishi mumkin) va bloklasa tegishli oqim o'z xabarini ko'rsatadi.
+    if (await resumePendingAction(ctx)) return;
 
     // Kontent so'ralmagan bo'lsa to'liq welcome'ni TAKROR yubormaymiz (spam
     // ko'rinishi). Foydalanuvchi welcome'ni allaqachon ko'rgan — qisqa tasdiq.
-    await ctx.reply("✅ A'zolik tasdiqlandi! Endi kino kodini yuboring yoki nomini yozib qidiring.");
+    await ctx.reply(
+      "✅ A'zolik tasdiqlandi! Endi kino kodini yuboring yoki nomini yozib qidiring."
+    );
   } else {
     await ctx.answerCallbackQuery({
       text: `❌ ${blocking.length} ta kanalga hali a'zo bo'lmadingiz!`,

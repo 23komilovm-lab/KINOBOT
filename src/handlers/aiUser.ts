@@ -2,7 +2,7 @@ import { Composer } from "grammy";
 import { prisma } from "../prisma.js";
 import { ce, e } from "../utils/emoji.js";
 import { ibtn, kb, userMenuKeyboard, aiActiveKeyboard } from "../utils/keyboard.js";
-import { checkContentAccess, checkAiAccess, countAiRequest } from "../utils/access.js";
+import { checkContentAccessResult, checkAiAccess, countAiRequest } from "../utils/access.js";
 import { normalizeTitle } from "../utils/translit.js";
 import { escapeLike } from "../services/search.js";
 import {
@@ -18,6 +18,7 @@ import { deliverMovie, deliverSerialSeasons } from "../services/delivery.js";
 import { isPremiumActive } from "../utils/premium.js";
 import type { DeliverResult } from "../services/delivery.js";
 import type { MyContext } from "../types.js";
+import { rememberPendingAction } from "../utils/pendingAction.js";
 
 export const aiUserHandler = new Composer<MyContext>();
 
@@ -431,8 +432,14 @@ export async function enterAiChat(ctx: MyContext, seedQuery?: string): Promise<v
     return;
   }
 
-  // AI suhbatiga kirish — obuna/premium tekshiruvi (so'rov hisoblanmaydi)
-  if (!(await checkContentAccess(ctx, false))) return;
+  // AI suhbatiga kirish — obuna/premium tekshiruvi (so'rov hisoblanmaydi).
+  // Obuna bloklasa amalni (va seed so'rovni) eslab qolamiz — "Tekshirish"
+  // bosilgach AI o'zi ochiladi va seed so'rovga javob beradi.
+  const acc = await checkContentAccessResult(ctx, false);
+  if (!acc.ok) {
+    if (acc.reason === "sub") rememberPendingAction(ctx, { kind: "ai", seed: seedQuery });
+    return;
+  }
 
   ctx.session.scratch = { ...(ctx.session.scratch ?? {}), aiChat: true };
   clearHistory(ctx); // yangi suhbat — tarix tozalanadi

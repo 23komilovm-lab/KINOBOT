@@ -3,13 +3,14 @@ import { prisma } from "../prisma.js";
 import { isAdmin } from "../config.js";
 import { ce, e } from "../utils/emoji.js";
 import { weightedRandomMovie } from "../services/recommend.js";
-import { checkContentAccess } from "../utils/access.js";
+import { checkContentAccessResult } from "../utils/access.js";
 import { confirmReferral } from "../utils/referral.js";
 import { deliverByCode, deliverMovie, deliverSerialSeasons } from "../services/delivery.js";
 import { searchContent } from "../services/search.js";
 import { enterAiChat } from "./aiUser.js";
 import { ADMIN_MENU_BUTTONS } from "../utils/keyboard.js";
 import type { MyContext } from "../types.js";
+import { rememberPendingAction, type PendingAction } from "../utils/pendingAction.js";
 
 export const searchHandler = new Composer<MyContext>();
 
@@ -29,21 +30,31 @@ const PANEL_TEXTS = new Set([
  * aks holda xato kod yozgan yoki premium kinoga urilgan foydalanuvchi bepul
  * so'rovini yo'qotib, hech narsa olmasdi.
  */
-async function checkAccess(ctx: MyContext): Promise<boolean> {
-  const ok = await checkContentAccess(ctx, false);
-  if (!ok) return false;
+async function checkAccess(ctx: MyContext, pending?: PendingAction): Promise<boolean> {
+  const res = await checkContentAccessResult(ctx, false);
+  if (!res.ok) {
+    // Obuna bloklagan bo'lsa amalni eslab qolamiz — "Tekshirish" bosilgach
+    // `resumeAction.ts` uni qayta bajaradi. Kvota/premium bloklaganda
+    // saqlanmaydi (premium taklifi ko'rsatilgan, izoh delivery.ts `gate` da).
+    if (res.reason === "sub" && pending) rememberPendingAction(ctx, pending);
+    return false;
+  }
   if (!isAdmin(ctx.from!.id)) await confirmReferral(ctx, ctx.from!.id);
   return true;
 }
 
 // ─── /mashhur — eng ko'p ko'rilgan kinolar ───────────────────────────────────
 searchHandler.command("mashhur", async (ctx) => {
-  if (!(await checkAccess(ctx))) return;
+  if (!(await checkAccess(ctx, { kind: "popular" }))) return;
   await renderPopular(ctx, 0, false);
 });
 
 // ─── /random — tasodifiy kino ────────────────────────────────────────────────
 searchHandler.command("random", async (ctx) => {
+  // Obuna bloklasa "random" deb eslab qolamiz — `deliverMovie` aniq kodni
+  // saqlagan bo'lardi va foydalanuvchi obunadan keyin o'sha bitta kinoni
+  // olardi, holbuki u TASODIFIY kino so'ragan.
+  if (!(await checkAccess(ctx, { kind: "random" }))) return;
   // Views-og'irlikli tanlov — mashhur kinolar ko'proq, lekin kam ko'rilganlar
   // ham imkoniyatga ega (adolatli tasodifiylik, recommend.ts ichida).
   const movie = await weightedRandomMovie(ctx);
@@ -62,7 +73,7 @@ searchHandler.callbackQuery(/^popular:page:(\d+)$/, async (ctx) => {
   await renderPopular(ctx, Number(ctx.match[1]), true);
 });
 
-async function renderPopular(ctx: MyContext, page: number, edit: boolean) {
+export async function renderPopular(ctx: MyContext, page: number, edit: boolean) {
   const PAGE = 10;
   const total = await prisma.movie.count();
   // Bo'sh baza — bo'sh ro'yxat o'rniga aniq xabar (arandom'dagi kabi uslubda)
@@ -149,7 +160,7 @@ searchHandler.on("message:text", async (ctx, next) => {
     return;
   }
 
-  if (!(await checkAccess(ctx))) return;
+  if (!(await checkAccess(ctx, { kind: "search", query: text }))) return;
   await searchByName(ctx, text);
 });
 
@@ -168,7 +179,7 @@ interface SearchState {
   items: SearchItem[];
 }
 
-async function searchByName(ctx: MyContext, query: string) {
+export async function searchByName(ctx: MyContext, query: string) {
   const hits = await searchContent(query, SEARCH_FETCH_LIMIT);
 
   if (hits.length === 0) {

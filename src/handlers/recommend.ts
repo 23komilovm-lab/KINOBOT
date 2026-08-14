@@ -1,7 +1,8 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { ce } from "../utils/emoji.js";
 import { recommendMovies, RECOMMEND_CALLBACK } from "../services/recommend.js";
-import { checkContentAccess } from "../utils/access.js";
+import { checkContentAccessResult } from "../utils/access.js";
+import { rememberPendingAction } from "../utils/pendingAction.js";
 import type { MyContext } from "../types.js";
 
 /**
@@ -20,7 +21,7 @@ export const recommendHandler = new Composer<MyContext>();
 const LIST_PAGE = 8; // har sahifada nechta kino
 const LIST_FETCH = 30; // hovuz hajmi (pagination shu ichida)
 
-async function renderList(ctx: MyContext, page: number, edit: boolean) {
+export async function renderList(ctx: MyContext, page: number, edit: boolean) {
   const movies = await recommendMovies(ctx, LIST_FETCH);
   if (movies.length === 0) {
     const empty =
@@ -52,22 +53,35 @@ async function renderList(ctx: MyContext, page: number, edit: boolean) {
   }
 }
 
+/**
+ * Darvoza + obuna bloklaganda amalni eslab qolish. "Tekshirish" bosilgach
+ * tavsiyalar ro'yxati o'zi ochiladi (`resumeAction.ts`).
+ */
+async function gateOrRemember(ctx: MyContext): Promise<boolean> {
+  const res = await checkContentAccessResult(ctx, false);
+  if (!res.ok) {
+    if (res.reason === "sub") rememberPendingAction(ctx, { kind: "recommend" });
+    return false;
+  }
+  return true;
+}
+
 // /recommend — to'liq gate (count yo'q)
 recommendHandler.command("recommend", async (ctx) => {
-  if (!(await checkContentAccess(ctx, false))) return;
+  if (!(await gateOrRemember(ctx))) return;
   await renderList(ctx, 0, false);
 });
 
 // Video ostidagi "🎯 Sizga yoqishi mumkin" — yangi xabar (videoni tahrirlab bo'lmaydi)
 recommendHandler.callbackQuery(RECOMMEND_CALLBACK, async (ctx) => {
   await ctx.answerCallbackQuery();
-  if (!(await checkContentAccess(ctx, false))) return;
+  if (!(await gateOrRemember(ctx))) return;
   await renderList(ctx, 0, false);
 });
 
 recommendHandler.callbackQuery(/^rec:page:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
-  if (!(await checkContentAccess(ctx, false))) return;
+  if (!(await gateOrRemember(ctx))) return;
   await renderList(ctx, Number(ctx.match[1]), true);
 });
 

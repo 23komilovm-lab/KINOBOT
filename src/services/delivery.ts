@@ -13,6 +13,7 @@ import { recordWatch } from "./recommend.js";
 import { saveProgress } from "./serialProgress.js";
 import { log } from "../utils/logger.js";
 import type { MyContext } from "../types.js";
+import { rememberPendingAction, type PendingAction } from "../utils/pendingAction.js";
 import type { Movie, Serial, Episode } from "@prisma/client";
 
 /**
@@ -39,26 +40,25 @@ export interface DeliverResult {
   found: boolean;
 }
 
-function storePendingCode(ctx: MyContext, code: number): void {
-  ctx.session.scratch = { ...(ctx.session.scratch ?? {}), pendingCode: code };
-}
-
 /**
- * Pre-gate. Obunaga bloklangan bo'lsa va `codeForPending` berilsa — kodni
- * eslab qolamiz (sub:check qayta yetkazadi). "quota"/"premium" da kod
- * saqlanmaydi — premium taklifi ko'rsatilgan, o'sha oqim o'z ishini qiladi.
+ * Pre-gate. Obunaga bloklangan bo'lsa `pending` amalni eslab qolamiz —
+ * "Tekshirish" bosilgach `resumeAction.ts` uni qayta bajaradi.
+ *
+ * FAQAT `reason === "sub"` da saqlanadi: "quota"/"premium" da premium taklifi
+ * ko'rsatilgan va o'sha oqim o'z ishini qiladi, amalni qayta bajarish esa
+ * foydalanuvchini yana o'sha devorga urardi.
  */
-async function gate(ctx: MyContext, codeForPending?: number): Promise<AccessResult> {
+async function gate(ctx: MyContext, pending?: PendingAction): Promise<AccessResult> {
   const res = await checkContentAccessResult(ctx, false);
-  if (!res.ok && res.reason === "sub" && codeForPending !== undefined) {
-    storePendingCode(ctx, codeForPending);
+  if (!res.ok && res.reason === "sub" && pending) {
+    rememberPendingAction(ctx, pending);
   }
   return res;
 }
 
 /** Kino yetkazish — to'liq gate + count. Views sendMovie ichida (muvaffaqiyatda). */
 export async function deliverMovie(ctx: MyContext, movie: Movie): Promise<DeliverResult> {
-  const g = await gate(ctx, movie.code);
+  const g = await gate(ctx, { kind: "code", code: movie.code });
   if (!g.ok) return { ok: false, reason: g.reason, delivered: false, found: true };
 
   if (!isAdmin(ctx.from!.id)) await confirmReferral(ctx, ctx.from!.id);
@@ -78,7 +78,7 @@ export async function deliverSerialSeasons(
   const serial = await prisma.serial.findUnique({ where: { id: serialId } });
   if (!serial) return { ok: true, reason: "ok", delivered: false, found: false };
 
-  const g = await gate(ctx, serial.code);
+  const g = await gate(ctx, { kind: "code", code: serial.code });
   if (!g.ok) return { ok: false, reason: g.reason, delivered: false, found: true };
 
   if (!isAdmin(ctx.from!.id)) await confirmReferral(ctx, ctx.from!.id);
@@ -91,8 +91,9 @@ export async function deliverEpisode(
   ctx: MyContext,
   episode: Episode & { season: { number: number; serial: Serial } }
 ): Promise<DeliverResult> {
-  // Episod uchun pendingCode saqlanmaydi (kod emas, bosib ochiladi)
-  const g = await gate(ctx);
+  // Episod kod bilan ochilmaydi, shuning uchun ID bo'yicha eslab qolinadi —
+  // obunadan keyin aynan o'sha qism yuboriladi.
+  const g = await gate(ctx, { kind: "episode", episodeId: episode.id });
   if (!g.ok) return { ok: false, reason: g.reason, delivered: false, found: true };
 
   const serial = episode.season.serial;
