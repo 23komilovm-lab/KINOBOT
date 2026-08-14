@@ -28,6 +28,19 @@ const SUB_NEGATIVE_TTL_MS = 20 * 1000;
 const MEMBERSHIP_CACHE_MAX = 2000;
 
 /**
+ * Bitta (kanal, foydalanuvchi) uchun a'zolik keshini bekor qiladi.
+ *
+ * `chat_member` yangilanishida CHAQIRILISHI SHART. Musbat natija 10 daqiqa
+ * keshlanadi — kesh tozalanmasa kanaldan chiqib ketgan odam o'sha vaqt
+ * davomida darvozadan bemalol o'tib ketardi (14.08.2026 da prodda shu
+ * aniqlandi). Telegram chiqishni darhol xabar qiladi, shuning uchun kesh
+ * TTL'ni kutmasdan aynan o'sha lahzada bekor qilinadi.
+ */
+export function invalidateMembership(chatId: bigint | number, userId: number): void {
+  membershipCache.delete(`${chatId}:${userId}`);
+}
+
+/**
  * Kanal ma'lumotini Telegramdan qayta oladi va tur o'zgargan bo'lsa yangilaydi
  * (ommaviy↔maxfiy). REQUEST/INSTAGRAM tegilmaydi.
  */

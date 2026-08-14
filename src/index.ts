@@ -8,6 +8,7 @@ import { trackUser } from "./middlewares/user.js";
 import { formatError, log } from "./utils/logger.js";
 import { ATTRIB_WINDOW_MS, recordChannelJoin, recordChannelLeave } from "./utils/channelEvents.js";
 import { resolveJoinSource } from "./utils/joinSource.js";
+import { invalidateMembership } from "./utils/subscription.js";
 import { reconcileBroadcastJobs } from "./services/broadcastJob.js";
 import { startChannelHealthWatcher } from "./services/channelHealth.js";
 
@@ -101,6 +102,13 @@ bot.on("chat_member", async (ctx) => {
   const wasIn = !leftStatuses.includes(oldStatus);
   const nowIn = !leftStatuses.includes(newStatus);
   const nowOut = leftStatuses.includes(newStatus);
+
+  // A'ZOLIK KESHINI DARHOL BEKOR QILAMIZ — statistikadan OLDIN va har qanday
+  // holat o'zgarishida. Musbat natija 10 daqiqa keshlanadi, ya'ni kanaldan
+  // chiqib ketgan odam kesh eskirmaguncha darvozadan bemalol o'tib ketardi.
+  // Qo'shilishda ham kerak: manfiy natija 20 soniya turadi va yangi a'zo
+  // "obuna emas" deb ushlab qolinardi.
+  invalidateMembership(chatId, userId);
 
   // Qo'shildi (statistika)
   if (!wasIn && nowIn) {
