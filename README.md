@@ -149,6 +149,22 @@ so'rovli kanalda esa zayifka soni (kutayotgan/tasdiqlangan).
 `channel_invite_links` registrida **qoladi** — shu tufayli "eski havola orqali
 qancha, yangisi orqali qancha" ajratib ko'rinadi (`#1`, `#2`, … tartib raqamlari).
 
+### Panel matni — yig'iladigan izohlar
+
+Statistika panellari uzun tushuntirishlar bilan cho'zilib ketgan edi (~24 qator).
+Endi **raqamlar ko'rinadi, proza esa** Telegram'ning `<blockquote expandable>`
+bloki ostida (Bot API 7.2+) — bitta bosishda ochiladi. Telegra.ph kabi tashqi
+xizmat kerak emas va ma'lumot Telegramdan chiqmaydi.
+
+Qoidalar:
+
+- Har panelda **bitta** izoh bloki (sitatani ichma-ich qo'yib bo'lmaydi).
+- Faqat tegishli izoh qo'shiladi — nol raqam haqida tushuntirish shovqin.
+- Manba kesimi bitta qatorda, **nol turlar tushiriladi** (`formatSourceLine`).
+- Dalil qatori uchala raqam nol bo'lganda umuman chiqmaydi.
+
+Natija: ko'rinadigan qism ~13–14 qator.
+
 ### Kanal sog'ligi (avtomatik kuzatuv)
 
 Uchta nosozlik botni **butunlay ishlamas qiladi va hech qanday xato bermaydi**:

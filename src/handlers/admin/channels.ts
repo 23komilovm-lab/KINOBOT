@@ -277,6 +277,34 @@ export function mergeSourceBuckets(
   return out;
 }
 
+/**
+ * Uzun izohlarni Telegram'ning YIG'ILADIGAN sitatasiga o'raydi (Bot API 7.2+).
+ *
+ * Panel qisqa ko'rinadi, izoh esa «ko'proq ko'rish» ostida joyida qoladi —
+ * telegra.ph kabi tashqi xizmat kerak emas va ma'lumot Telegramdan chiqmaydi.
+ *
+ * DIQQAT: sitatani ichma-ich qo'yib bo'lmaydi, shuning uchun har panelda BITTA
+ * blok bo'ladi — barcha tushuntirishlar shu yerga yig'iladi.
+ */
+function foldedHints(hints: string[]): string {
+  if (hints.length === 0) return "";
+  return `\n\n<blockquote expandable>ℹ️ <b>Izoh</b>\n${hints.join("\n\n")}</blockquote>`;
+}
+
+/**
+ * Manba kesimi BITTA qatorda. Nol turlar tushirib qoldiriladi — ilgari har
+ * biri alohida qator edi va panelning yarmi nollardan iborat bo'lardi.
+ */
+export function formatSourceLine(src: ChannelStatsData["source"]): string {
+  const parts: string[] = [];
+  if (src.bot) parts.push(`🤖 Bot <b>${src.bot}</b>`);
+  if (src.link) parts.push(`🔗 Havola <b>${src.link}</b>`);
+  if (src.request) parts.push(`📋 So'rov <b>${src.request}</b>`);
+  if (src.folder) parts.push(`📁 Papka <b>${src.folder}</b>`);
+  if (src.unknown) parts.push(`❔ Noma'lum <b>${src.unknown}</b>`);
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
 /** Panel matnini sof quruvchi. Alohida export — vitest'da Telegram/DB siz test qilish mumkin. */
 export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string {
   const handle = c.username ? `@${c.username}` : (c.inviteLink ?? "(havola yo'q)");
@@ -316,24 +344,45 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
   // shu yerdan bilib, to'liq taqsimotni "🔗 Havolalar" ekranida ko'radi.
   const linkStatsLine = s.links
     ? `\n🧷 Havolalar: <b>${s.links.count}</b> ta · joriy havola orqali: <b>` +
-      `${c.type === "REQUEST" ? s.links.currentRequests : s.links.currentJoined}</b>` +
-      (s.links.count > 1 ? `\n<i>Eski havolalar kesimi — "🔗 Havolalar" tugmasida.</i>` : "")
+      `${c.type === "REQUEST" ? s.links.currentRequests : s.links.currentJoined}</b>`
     : "";
 
-  // "Bot orqali" raqamining DALIL kesimi. Ikki yo'l bir xil yorliq oladi, lekin
-  // ishonchliligi teng emas — adminni chalg'itmaslik uchun ajratib ko'rsatamiz.
-  const botSignalBlock = s.botSignal
-    ? `\n\n🔬 <b>"Bot orqali" qanchalik aniq:</b>\n` +
-      `  ✅ Havola bilan tasdiqlangan: <b>${s.botSignal.byLink}</b>\n` +
-      `  🤔 Darvoza bo'yicha taxmin: <b>${s.botSignal.byGate}</b>\n` +
-      `  ❔ Kuzatuvdan oldingi: <b>${s.botSignal.legacy}</b>\n` +
-      `<i>"Taxmin" — Telegram havolani aytmagan (odam ommaviy kanalga @username ` +
-      `yoki qidiruv orqali kirgan), lekin unga shu kanal oxirgi 30 daqiqada ` +
-      `majburiy obuna sifatida ko'rsatilgan. Bunday odam kanalni o'zi topib ` +
-      `qo'shilgan bo'lishi ham mumkin — uni bot xizmati deb to'liq hisoblab ` +
-      `bo'lmaydi. "Kuzatuvdan oldingi" — havola ustuni yozila boshlashidan ` +
-      `avvalgi yozuvlar, qaysi yo'l bilan kelgani umuman ma'lum emas.</i>`
-    : "";
+  // "Bot orqali" raqamining DALIL kesimi — bitta qatorda. Ikki yo'l bir xil
+  // yorliq oladi, lekin ishonchliligi teng emas, shuning uchun ajratiladi.
+  //
+  // Uchalasi nol bo'lsa qator UMUMAN chiqmaydi: "✅ 0 · 🤔 0 · ❔ 0" hech narsa
+  // aytmaydi, faqat panelni cho'zadi (yangi kanalda aynan shunday bo'ladi).
+  const hasSignal =
+    !!s.botSignal && s.botSignal.byLink + s.botSignal.byGate + s.botSignal.legacy > 0;
+  const signalLine =
+    hasSignal && s.botSignal
+      ? `\n🔬 Dalil: ✅ <b>${s.botSignal.byLink}</b> havola · ` +
+        `🤔 <b>${s.botSignal.byGate}</b> taxmin · ❔ <b>${s.botSignal.legacy}</b> eski`
+      : "";
+
+  // Barcha uzun tushuntirishlar — bitta yig'iladigan blokda, panel oxirida.
+  // Faqat tegishlisi qo'shiladi: nol raqam haqida izoh keraksiz shovqin.
+  const hints: string[] = [];
+  if (hasSignal) {
+    hints.push(
+      `<b>Dalil kesimi.</b> «Havola» — Telegram aynan bot havolasini qaytargan, ` +
+        `bu qat'iy dalil. «Taxmin» — Telegram havolani aytmagan (odam ommaviy ` +
+        `kanalga @username yoki qidiruv orqali kirgan), lekin unga shu kanal ` +
+        `oxirgi 30 daqiqada majburiy obuna sifatida ko'rsatilgan: bunday odam ` +
+        `kanalni o'zi topib qo'shilgan bo'lishi ham mumkin. «Eski» — havola ` +
+        `kuzatuvi boshlanishidan avvalgi yozuvlar, qaysi yo'l bilan kelgani ` +
+        `umuman ma'lum emas.`
+    );
+  }
+  if (s.source.unknown > 0) {
+    hints.push(
+      `<b>Noma'lum manba.</b> Telegram qo'shilish yo'lini aytmagan, yoki yozuv ` +
+        `kuzatuv boshlanishidan oldin qilingan.`
+    );
+  }
+  if (s.links && s.links.count > 1) {
+    hints.push(`<b>Eski havolalar</b> kesimi «🔗 Havolalar» tugmasida.`);
+  }
 
   // SO'ROVLI KANAL — butunlay boshqa hisob.
   //
@@ -347,21 +396,23 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
   // zayifkalar "bot" deb belgilanmagan — shuning uchun u yordamchi raqam.
   if (c.type === "REQUEST" && s.req) {
     const r = s.req;
+    hints.unshift(
+      `<b>Zayifka</b> yuborgan odam guruhga hali KIRMAGAN — tasdiqlashni kutyapti. ` +
+        `«Kuzatuv tasdiqlagan» faqat 09.08.2026 dan beri yozilyapti, shuning uchun ` +
+        `jami zayifkadan kam ko'rinadi.`
+    );
     return (
       `${header}\n\n` +
       `<b>📨 Zayifkalar (bot darvozasi orqali):</b>\n` +
       `  Bugun: <b>${r.today}</b> · 7 kun: <b>${r.week}</b> · ` +
       `30 kun: <b>${r.month}</b> · Jami: <b>${r.total}</b>\n` +
-      `⏳ Navbatda kutayapti: <b>${s.reqPending}</b>\n` +
-      `✅ Tasdiqlangan: <b>${r.approved}</b>\n` +
-      `👥 Hozirgi a'zolar (Telegram): <b>${s.memberCount ?? "—"}</b>\n` +
-      `🤖 Kuzatuv tasdiqlagan: <b>${s.botTotal}</b>\n` +
-      `<i>Zayifka yuborgan odam guruhga hali KIRMAGAN — tasdiqlashni kutyapti. ` +
-      `"Kuzatuv tasdiqlagan" faqat 09.08.2026 dan beri yozilyapti, shuning uchun ` +
-      `jami zayifkadan kam ko'rinadi.</i>` +
-      botSignalBlock +
+      `⏳ Navbatda: <b>${s.reqPending}</b> · ✅ Tasdiqlangan: <b>${r.approved}</b>\n` +
+      `👥 A'zolar (Telegram): <b>${s.memberCount ?? "—"}</b> · ` +
+      `🤖 Kuzatuv tasdiqlagan: <b>${s.botTotal}</b>` +
+      signalLine +
       linkLine +
-      linkStatsLine
+      linkStatsLine +
+      foldedHints(hints)
     );
   }
 
@@ -370,19 +421,13 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
     `<b>📊 Bot orqali qo'shilgan yagona odamlar:</b>\n` +
     `  Bugun: <b>${s.botToday}</b> · 7 kun: <b>${s.botWeek}</b> · ` +
     `30 kun: <b>${s.botMonth}</b> · Jami: <b>${s.botTotal}</b>\n` +
-    `👥 Hozirgi a'zolar (Telegram): <b>${s.memberCount ?? "—"}</b>\n` +
-    `🤖 Bot orqali, hozir a'zoda: <b>${s.currentBot}</b>` +
-    `\n\n🧭 <b>Manba (jami, yagona):</b>\n` +
-    `  🤖 Bot: <b>${s.source.bot}</b>\n` +
-    `  🔗 Havola: <b>${s.source.link}</b>\n` +
-    `  📋 So'rov: <b>${s.source.request}</b>\n` +
-    `  📁 Papka: <b>${s.source.folder}</b>\n` +
-    `  ❔ Noma'lum: <b>${s.source.unknown}</b>\n` +
-    `<i>"Noma'lum" — eski yozuvlar yoki Telegram manba bermagan holat. ` +
-    `Kuzatuvdan oldingi qo'shilishlar ham shu yerga kiradi.</i>` +
-    botSignalBlock +
+    `👥 A'zolar (Telegram): <b>${s.memberCount ?? "—"}</b> · ` +
+    `🤖 Bot orqali hozir a'zoda: <b>${s.currentBot}</b>\n` +
+    `🧭 Manba: ${formatSourceLine(s.source)}` +
+    signalLine +
     linkLine +
-    linkStatsLine
+    linkStatsLine +
+    foldedHints(hints)
   );
 }
 

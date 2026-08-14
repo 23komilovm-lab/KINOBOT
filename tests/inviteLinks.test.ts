@@ -156,9 +156,11 @@ describe("buildInviteLinkPanel", () => {
       false,
       stats({ rows: [row({ isCurrent: true, joined: 3 })], unattributedJoins: 1868 })
     );
-    expect(panel).toContain("❔ <b>Havola aniqlanmagan:</b>");
-    expect(panel).toContain("Bot orqali qo'shilgan: <b>1868</b>");
+    expect(panel).toContain("❔ <b>Havola aniqlanmagan:</b> qo'shilgan <b>1868</b>");
+    // Izoh yig'iladigan sitatada — panel qisqa ko'rinadi
+    expect(panel).toContain("<blockquote expandable>");
     expect(panel).toContain(LINK_TRACKING_START);
+    expect(panel.split("<blockquote")[0]).not.toContain(LINK_TRACKING_START);
     // Aniqlanmaganlar havolalar yig'indisiga QO'SHILMAYDI — aks holda raqam yolg'on bo'lardi
     expect(panel).toContain("qo'shilgan <b>3</b>");
   });

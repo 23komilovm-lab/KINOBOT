@@ -296,13 +296,8 @@ export function buildInviteLinkPanel(
 
   const unattrBlock =
     s.unattributedJoins > 0 || s.unattributedRequests > 0
-      ? `\n\n❔ <b>Havola aniqlanmagan:</b>\n` +
-        `  👤 Bot orqali qo'shilgan: <b>${s.unattributedJoins}</b>` +
-        (isRequestChannel ? `\n  📨 Zayifka: <b>${s.unattributedRequests}</b>` : "") +
-        `\n<i>Ikki sabab: (1) havola kesimi ${LINK_TRACKING_START} dan beri ` +
-        `yozilyapti — undan oldingi qo'shilishlarda Telegram qaysi havola ` +
-        `ishlatilganini aytmaydi; (2) odam havolasiz kirgan (ommaviy kanalga ` +
-        `@username yoki qidiruv orqali).</i>`
+      ? `\n\n❔ <b>Havola aniqlanmagan:</b> qo'shilgan <b>${s.unattributedJoins}</b>` +
+        (isRequestChannel ? ` · zayifka <b>${s.unattributedRequests}</b>` : "")
       : "";
 
   const totals =
@@ -310,5 +305,18 @@ export function buildInviteLinkPanel(
     `hozir a'zo <b>${totalMembers}</b>` +
     (isRequestChannel ? ` · zayifka <b>${totalReq}</b>` : "");
 
-  return `${head}\n${blocks.join("\n\n")}${more}${unattrBlock}${totals}`;
+  // Uzun izoh — Telegram'ning yig'iladigan sitatasida (Bot API 7.2+), panel
+  // oxirida. Kanal paneli bilan bir xil uslub: raqamlar ko'rinadi, proza
+  // «ko'proq ko'rish» ostida.
+  const hint =
+    s.unattributedJoins > 0 || s.unattributedRequests > 0
+      ? `\n\n<blockquote expandable>ℹ️ <b>Izoh</b>\n` +
+        `«Havola aniqlanmagan» ikki sababdan bo'ladi: (1) havola kesimi ` +
+        `${LINK_TRACKING_START} dan beri yozilyapti — undan oldingi ` +
+        `qo'shilishlarda Telegram qaysi havola ishlatilganini aytmaydi; ` +
+        `(2) odam havolasiz kirgan (ommaviy kanalga @username yoki qidiruv ` +
+        `orqali).</blockquote>`
+      : "";
+
+  return `${head}\n${blocks.join("\n\n")}${more}${unattrBlock}${totals}${hint}`;
 }

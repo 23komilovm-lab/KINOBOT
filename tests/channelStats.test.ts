@@ -240,15 +240,14 @@ describe("buildChannelStatsPanel", () => {
     expect(panel).toContain(
       "Bugun: <b>1</b> · 7 kun: <b>4</b> · 30 kun: <b>9</b> · Jami: <b>12</b>"
     );
-    expect(panel).toContain("👥 Hozirgi a'zolar (Telegram): <b>500</b>");
-    expect(panel).toContain("🤖 Bot orqali, hozir a'zoda: <b>11</b>");
-    expect(panel).toContain("🤖 Bot: <b>0</b>");
-    expect(panel).toContain("❔ Noma'lum: <b>0</b>");
+    expect(panel).toContain("👥 A'zolar (Telegram): <b>500</b>");
+    expect(panel).toContain("🤖 Bot orqali hozir a'zoda: <b>11</b>");
+    expect(panel).toContain("🧭 Manba: —");
   });
 
   it("memberCount null bo'lsa '—' ko'rsatiladi", () => {
     const panel = buildChannelStatsPanel(chan({}), stats());
-    expect(panel).toContain("👥 Hozirgi a'zolar (Telegram): <b>—</b>");
+    expect(panel).toContain("👥 A'zolar (Telegram): <b>—</b>");
   });
 
   it("manba kesimini (yagona) to'liq chiqaradi", () => {
@@ -258,12 +257,30 @@ describe("buildChannelStatsPanel", () => {
         source: { bot: 3, link: 1, request: 2, folder: 4, unknown: 7 },
       })
     );
-    expect(panel).toContain("🤖 Bot: <b>3</b>");
-    expect(panel).toContain("🔗 Havola: <b>1</b>");
-    expect(panel).toContain("📋 So'rov: <b>2</b>");
-    expect(panel).toContain("📁 Papka: <b>4</b>");
-    expect(panel).toContain("❔ Noma'lum: <b>7</b>");
-    expect(panel).toContain('"Noma\'lum"');
+    // BITTA qatorda — ilgari har turi alohida qator edi va panelning yarmi
+    // nollardan iborat bo'lardi.
+    expect(panel).toContain(
+      "🧭 Manba: 🤖 Bot <b>3</b> · 🔗 Havola <b>1</b> · 📋 So'rov <b>2</b> · " +
+        "📁 Papka <b>4</b> · ❔ Noma'lum <b>7</b>"
+    );
+    // Izoh yig'iladigan sitatada — panel qisqa ko'rinadi
+    expect(panel).toContain("<blockquote expandable>");
+    expect(panel).toContain("Noma'lum manba.");
+  });
+
+  it("NOL manbalar tushirib qoldiriladi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ source: { bot: 5, link: 0, request: 0, folder: 0, unknown: 2 } })
+    );
+    expect(panel).toContain("🧭 Manba: 🤖 Bot <b>5</b> · ❔ Noma'lum <b>2</b>");
+    expect(panel).not.toContain("Papka");
+    expect(panel).not.toContain("So'rov");
+  });
+
+  it("hamma manba nol bo'lsa — '—'", () => {
+    const panel = buildChannelStatsPanel(chan({}), stats());
+    expect(panel).toContain("🧭 Manba: —");
   });
 
   it("REQUEST — asosiy metrika ZAYIFKA soni, 'qo'shilgan' emas", () => {
@@ -281,7 +298,7 @@ describe("buildChannelStatsPanel", () => {
     );
     expect(panel).toContain("📨 Zayifkalar");
     expect(panel).toContain("Bugun: <b>777</b>");
-    expect(panel).toContain("⏳ Navbatda kutayapti: <b>10471</b>");
+    expect(panel).toContain("⏳ Navbatda: <b>10471</b>");
     expect(panel).toContain("✅ Tasdiqlangan: <b>0</b>");
     expect(panel).toContain("🤖 Kuzatuv tasdiqlagan: <b>1868</b>");
     // Adashtiradigan "qo'shilgan odamlar" sarlavhasi bu yerda BO'LMASLIGI kerak
@@ -321,7 +338,7 @@ describe("buildChannelStatsPanel", () => {
     );
     expect(panel).toContain("🧷 Havolalar: <b>3</b> ta · joriy havola orqali: <b>12</b>");
     // Bittadan ko'p havola bor — eski havolalar qayerdan ko'rilishi aytiladi
-    expect(panel).toContain('"🔗 Havolalar"');
+    expect(panel).toContain("«🔗 Havolalar»");
   });
 
   it("bitta havola bo'lsa — 'eski havolalar' izohi keraksiz", () => {
@@ -357,15 +374,50 @@ describe("buildChannelStatsPanel", () => {
       chan({}),
       stats({ botTotal: 862, botSignal: { byLink: 12, byGate: 40, legacy: 810 } })
     );
-    expect(panel).toContain("✅ Havola bilan tasdiqlangan: <b>12</b>");
-    expect(panel).toContain("🤔 Darvoza bo'yicha taxmin: <b>40</b>");
-    expect(panel).toContain("❔ Kuzatuvdan oldingi: <b>810</b>");
+    // Bitta qatorda, izoh esa yig'iladigan sitatada
+    expect(panel).toContain(
+      "🔬 Dalil: ✅ <b>12</b> havola · 🤔 <b>40</b> taxmin · ❔ <b>810</b> eski"
+    );
+    expect(panel).toContain("<blockquote expandable>");
     expect(panel).toContain("o'zi topib");
   });
 
-  it("botSignal bo'lmasa blok chiqmaydi", () => {
+  it("botSignal bo'lmasa dalil qatori chiqmaydi", () => {
     const panel = buildChannelStatsPanel(chan({}), stats({ botTotal: 5 }));
-    expect(panel).not.toContain("Darvoza bo'yicha taxmin");
+    expect(panel).not.toContain("🔬 Dalil");
+  });
+
+  it("dalil raqamlari UCHALASI NOL bo'lsa qator umuman chiqmaydi", () => {
+    // Yangi kanalda aynan shunday bo'ladi — "✅ 0 · 🤔 0 · ❔ 0" hech narsa
+    // aytmaydi, faqat panelni cho'zadi.
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({ botSignal: { byLink: 0, byGate: 0, legacy: 0 } })
+    );
+    expect(panel).not.toContain("🔬 Dalil");
+    expect(panel).not.toContain("Dalil kesimi.");
+  });
+
+  it("izohlar YIG'ILADIGAN sitatada — panel qisqa ko'rinadi", () => {
+    // Telegram <blockquote expandable> uzun matnni "ko'proq ko'rish" ostiga
+    // yashiradi: telegra.ph kabi tashqi xizmat kerak emas.
+    const panel = buildChannelStatsPanel(
+      chan({}),
+      stats({
+        source: { bot: 5, link: 0, request: 0, folder: 0, unknown: 900 },
+        botSignal: { byLink: 4, byGate: 1, legacy: 900 },
+      })
+    );
+    const visible = panel.split("<blockquote")[0];
+    // Ko'rinadigan qism qisqa; uzun prozaning hammasi sitata ichida
+    expect(visible.split("\n").length).toBeLessThanOrEqual(14);
+    expect(visible).not.toContain("Telegram havolani aytmagan");
+    expect(panel).toContain("Telegram havolani aytmagan");
+  });
+
+  it("izoh yo'q bo'lsa sitata umuman qo'shilmaydi", () => {
+    const panel = buildChannelStatsPanel(chan({}), stats());
+    expect(panel).not.toContain("<blockquote");
   });
 
   it("so'rovli kanalda ham dalil kesimi ko'rinadi", () => {
@@ -376,7 +428,7 @@ describe("buildChannelStatsPanel", () => {
         botSignal: { byLink: 4, byGate: 9, legacy: 2 },
       })
     );
-    expect(panel).toContain("✅ Havola bilan tasdiqlangan: <b>4</b>");
+    expect(panel).toContain("🔬 Dalil: ✅ <b>4</b> havola");
   });
 
   // ---- Sog'liq bloki ----
