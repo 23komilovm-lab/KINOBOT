@@ -31,6 +31,7 @@ import {
   runHealthSweep,
   getCachedHealth,
   PROBLEM_LABEL,
+  UNLIMITED_MEMBER_LIMIT,
 } from "../src/services/channelHealth.js";
 
 const BOT_ID = 777;
@@ -129,6 +130,67 @@ describe("checkChannelHealth", () => {
   it("creator statusi — huquq maydonisiz ham to'liq ruxsat", async () => {
     const a = api({ getChatMember: vi.fn().mockResolvedValue({ status: "creator" }) });
     const h = await checkChannelHealth(a, chan(), BOT_ID, { retryDelayMs: 0 });
+    expect(h.problems).toEqual([]);
+  });
+
+  // ---- JIM O'LADIGAN HAVOLA ----
+  // `editChatInviteLink` muvaffaqiyatli bo'lsa ham, havolada a'zo limiti yoki
+  // muddat bo'lsa u to'lgach o'ladi va darvoza xatosiz buziladi. Prodda
+  // 14.08.2026 da "Uy Joylar buxoro" havolasida member_limit=9 edi.
+  it("a'zo limiti bor havola — link_limited", async () => {
+    const a = api({
+      editChatInviteLink: vi
+        .fn()
+        .mockResolvedValue({ invite_link: "https://t.me/+tracking", member_limit: 9 }),
+    });
+    const h = await checkChannelHealth(a, chan(), BOT_ID, { act: true, retryDelayMs: 0 });
+    expect(h.problems).toEqual(["link_limited"]);
+  });
+
+  it("muddati bor havola — link_limited", async () => {
+    const a = api({
+      editChatInviteLink: vi
+        .fn()
+        .mockResolvedValue({ invite_link: "https://t.me/+tracking", expire_date: 1786665600 }),
+    });
+    const h = await checkChannelHealth(a, chan(), BOT_ID, { act: true, retryDelayMs: 0 });
+    expect(h.problems).toEqual(["link_limited"]);
+  });
+
+  it("link_limited kanalni O'CHIRMAYDI — havola hali ishlayapti", async () => {
+    // Hozir o'chirish erta: ogohlantirish yetarli. Limit to'lib havola
+    // o'lganda `link_dead` ishga tushadi va kanal o'sha payt chiqariladi.
+    const a = api({
+      editChatInviteLink: vi
+        .fn()
+        .mockResolvedValue({ invite_link: "https://t.me/+tracking", member_limit: 9 }),
+    });
+    const h = await checkChannelHealth(a, chan(), BOT_ID, { act: true, retryDelayMs: 0 });
+    expect(h.disabled).toBe(false);
+    expect(channelUpdate).not.toHaveBeenCalled();
+  });
+
+  it("limitsiz havola — muammo yo'q", async () => {
+    const a = api({
+      editChatInviteLink: vi
+        .fn()
+        .mockResolvedValue({ invite_link: "https://t.me/+tracking", member_limit: 0 }),
+    });
+    const h = await checkChannelHealth(a, chan(), BOT_ID, { act: true, retryDelayMs: 0 });
+    expect(h.problems).toEqual([]);
+  });
+
+  it("maksimal limit — bizning «limitsiz» belgimiz, muammo emas", async () => {
+    // `member_limit: 0` Telegram tomonidan e'tiborsiz qoldiriladi, shuning uchun
+    // limitni olib tashlash = maksimal qiymat qo'yish. Uni muammo deb belgilash
+    // har sweep'da yolg'on ogohlantirish berardi.
+    const a = api({
+      editChatInviteLink: vi.fn().mockResolvedValue({
+        invite_link: "https://t.me/+tracking",
+        member_limit: UNLIMITED_MEMBER_LIMIT,
+      }),
+    });
+    const h = await checkChannelHealth(a, chan(), BOT_ID, { act: true, retryDelayMs: 0 });
     expect(h.problems).toEqual([]);
   });
 

@@ -23,7 +23,8 @@ import { formatError, log, notifyOwner } from "../utils/logger.js";
  * o'chirgan bo'lsak (egasi qo'lda o'chirganini qayta yoqmaymiz).
  */
 
-export type ChannelProblem = "no_access" | "not_admin" | "no_invite_right" | "link_dead";
+export type ChannelProblem =
+  "no_access" | "not_admin" | "no_invite_right" | "link_dead" | "link_limited";
 
 export interface ChannelHealth {
   problems: ChannelProblem[];
@@ -39,14 +40,39 @@ export const PROBLEM_LABEL: Record<ChannelProblem, string> = {
   not_admin: "bot admin emas — a'zolikni tekshira olmaydi",
   no_invite_right: "botda «havola orqali taklif qilish» huquqi yo'q",
   link_dead: "tracking havolasi o'lik — yangi foydalanuvchilar obuna bo'la olmaydi",
+  link_limited:
+    "tracking havolasida A'ZO LIMITI yoki MUDDAT bor — to'lgach havola o'ladi va " +
+    "darvoza jimgina buziladi. Telegram'da kanal → Taklif havolalari → shu " +
+    "havolani tahrirlab limitni olib tashlang",
 };
 
 /**
- * Darvozani buzadigan muammolar. `no_invite_right` bu ro'yxatda YO'Q: bot
- * havola yarata olmasa ham a'zolikni tekshira oladi, ya'ni mavjud havola bilan
- * darvoza ishlayveradi — bunday kanalni o'chirish zarar keltiradi.
+ * Darvozani buzadigan muammolar. Ikkitasi ataylab ro'yxatda YO'Q:
+ *
+ * · `no_invite_right` — bot havola yarata olmasa ham a'zolikni tekshira oladi,
+ *   ya'ni mavjud havola bilan darvoza ishlayveradi.
+ * · `link_limited` — havola HALI ishlayapti, faqat limiti bor. Kanalni hozir
+ *   o'chirish erta bo'lardi: ogohlantirish yuboriladi, limit to'lib havola
+ *   o'lganda `link_dead` ishga tushadi va kanal o'sha payt chiqariladi.
  */
 const BLOCKING: ChannelProblem[] = ["no_access", "not_admin", "link_dead"];
+
+/**
+ * Telegram'da taklif havolasini "limitsiz" qilishning YAGONA yo'li — maksimal
+ * qiymat. `member_limit: 0` yuborilsa Telegram uni e'tiborsiz qoldiradi va eski
+ * limit joyida qoladi (14.08.2026 da prodda tekshirilgan), `creates_join_request`
+ * ni almashtirish esa vaqtinchalik: `false` ga qaytganda limit tiklanadi.
+ */
+export const UNLIMITED_MEMBER_LIMIT = 99_999;
+
+/**
+ * Havolada AMALDA cheklov bormi. `UNLIMITED_MEMBER_LIMIT` — bizning "limitsiz"
+ * belgimiz, uni muammo deb hisoblamaymiz.
+ */
+export function isLimited(memberLimit?: number, expireDate?: number): boolean {
+  if (expireDate) return true;
+  return !!memberLimit && memberLimit < UNLIMITED_MEMBER_LIMIT;
+}
 
 /** Sog'liq holati panelda ko'rsatish uchun keshda (sweep to'ldiradi) */
 const healthCache = new Map<string, ChannelHealth>();
@@ -163,7 +189,20 @@ export async function checkChannelHealth(
       }),
     opts.retryDelayMs
   );
-  if (!alive) problems.push("link_dead");
+  if (!alive) {
+    problems.push("link_dead");
+    return finish();
+  }
+
+  // JIM O'LADIGAN HAVOLA. `editChatInviteLink` muvaffaqiyatli — havola tirik,
+  // lekin unda a'zo limiti yoki muddat bo'lsa u TO'LGACH o'ladi va darvoza
+  // hech qanday xatosiz buziladi. Bot bunday limitni hech qachon qo'ymaydi
+  // (`createChatInviteLink` chaqiruvlarida `member_limit` yo'q) — demak uni
+  // Telegram ilovasida qo'lda qo'yishgan.
+  //
+  // 14.08.2026 prodda aynan shu bo'ldi: BARCHA 5 kanal havolasida limit bor edi
+  // (9, 6, 3, 4, 9) va majburiy obuna jimgina ishlamay qolgandi.
+  if (isLimited(alive.member_limit, alive.expire_date)) problems.push("link_limited");
   return finish();
 }
 

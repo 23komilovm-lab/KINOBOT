@@ -205,6 +205,23 @@ tekshiradi:
 | Kanal mavjudmi | `getChat` |
 | Bot admin va huquqlari joyidami | `getChatMember(bot)` → `can_invite_users` |
 | Tracking havolasi tirikmi | `editChatInviteLink` (faqat bot yaratgan va tirik havolani tahrirlaydi) |
+| Havolada limit/muddat bormi | o'sha javobning `member_limit` / `expire_date` maydonlari |
+
+⚠️ **Jim o'ladigan havola.** Havolada a'zo limiti bo'lsa `editChatInviteLink`
+muvaffaqiyatli qaytadi — havola «tirik» ko'rinadi, lekin limit to'lgach o'ladi va
+majburiy obuna hech qanday xatosiz buziladi. 14.08.2026 da prodda **beshta
+kanalning hammasida** limit bor edi (9, 6, 3, 4, 9). Bot `member_limit` ni hech
+qachon qo'ymaydi — ular Telegram ilovasidan qo'lda qo'yilgan.
+
+Limitni olib tashlashning yagona yo'li — **maksimal qiymat** (`99999`):
+`member_limit: 0` Telegram tomonidan e'tiborsiz qoldiriladi, `creates_join_request`
+ni almashtirish esa vaqtinchalik (`false` ga qaytganda eski limit tiklanadi).
+Ikkalasi ham prodda tekshirilgan. Shuning uchun `UNLIMITED_MEMBER_LIMIT = 99999`
+bizning «limitsiz» belgimiz va `isLimited()` uni muammo deb hisoblamaydi.
+
+`link_limited` kanalni darvozadan **chiqarmaydi** — havola hali ishlayapti,
+faqat ogohlantirish yuboriladi. Limit to'lib havola o'lganda `link_dead` ishga
+tushadi va kanal o'sha payt chiqariladi.
 
 **Reaksiya: bot kanalga hech narsa YOZMAYDI.** Darvozani buzadigan muammo
 topilsa (`no_access`, `not_admin`, `link_dead`) o'sha kanalning majburiy
