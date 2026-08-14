@@ -337,7 +337,21 @@ export function formatSourceLine(src: ChannelStatsData["source"]): string {
 
 /** Panel matnini sof quruvchi. Alohida export — vitest'da Telegram/DB siz test qilish mumkin. */
 export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string {
-  const handle = c.username ? `@${c.username}` : (c.inviteLink ?? "(havola yo'q)");
+  // Username bo'lsa u "Tur" yonida, bitta qatorda va BOSILADIGAN bo'ladi —
+  // manzil AYNAN `t.me/<username>` (tracking havolasi emas): u hech qachon
+  // eskirmaydi va bekor qilib bo'lmaydi.
+  //
+  // DIQQAT: bu panelni yuboradigan `editMessageText` da `link_preview_options`
+  // bilan havola oldi ko'rinishi O'CHIRILGAN bo'lishi shart, aks holda Telegram
+  // xabar ostiga "Kanalni ko'rish" kartochkasini qo'shib yuboradi.
+  const uname = c.username?.replace(/^@/, "");
+  const typeLine = uname
+    ? `Tur: <b>${TYPE_LABEL[c.type]}</b> · <a href="https://t.me/${encodeURIComponent(uname)}">@${e.escapeHtml(uname)}</a>`
+    : `Tur: <b>${TYPE_LABEL[c.type]}</b>`;
+
+  // Username yo'q kanalda havola alohida qatorda qoladi — u uzun va
+  // "Tur" yoniga sig'maydi.
+  const handleLine = uname ? "" : `\n<code>${e.escapeHtml(c.inviteLink ?? "(havola yo'q)")}</code>`;
 
   // Nosozlik ENG TEPADA. Bot admin bo'lmasa yoki havola o'lik bo'lsa raqamlar
   // ahamiyatsiz — avval shuni ko'rish kerak.
@@ -353,9 +367,9 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
 
   const header =
     `<tg-emoji emoji-id="${BE.channel}">📢</tg-emoji> <b>${e.escapeHtml(c.title)}</b>\n` +
-    `Tur: <b>${TYPE_LABEL[c.type]}</b>\n` +
-    `<code>${e.escapeHtml(handle)}</code>\n` +
-    `Majburiy obuna: <b>${c.isActive ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>` +
+    typeLine +
+    handleLine +
+    `\nMajburiy obuna: <b>${c.isActive ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>` +
     healthBlock;
 
   // Instagram/boshqa — a'zolik API orqali tekshirilmaydi (sintetik salbiy chatId
@@ -592,7 +606,15 @@ async function renderChannelDetail(ctx: MyContext, id: number, opts: { recheck?:
   // faqat "Kanal boshqaruvi → O'chirish" menyusi orqali (ch:del → ch:delconf).
   rows.push([backBtn("ch:list")]);
 
-  await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
+  await ctx
+    .editMessageText(text, {
+      // MAJBURIY: panelda `@username` havolasi bor. O'chirilmasa Telegram xabar
+      // ostiga kanal kartochkasini ("Kanalni ko'rish") qo'shib yuboradi va
+      // panel ikki barobar uzayadi.
+      link_preview_options: { is_disabled: true },
+      reply_markup: kb(...rows),
+    })
+    .catch(() => {});
 }
 
 channelsHandler.callbackQuery(/^ch:view:(\d+)$/, async (ctx) => {

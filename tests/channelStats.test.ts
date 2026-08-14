@@ -478,6 +478,46 @@ describe("buildChannelStatsPanel", () => {
     expect(panel).toContain("Zayifkalar");
   });
 
+  // ---- Sarlavha: "Tur · @username" bir qatorda ----
+  it("username bor kanalda tur va username BIR QATORDA, username bosiladigan", () => {
+    const panel = buildChannelStatsPanel(chan({ username: "kino_kanal" }), stats());
+    expect(panel).toContain(
+      'Tur: <b>Ommaviy</b> · <a href="https://t.me/kino_kanal">@kino_kanal</a>'
+    );
+  });
+
+  it("username havolasi AYNAN t.me/<username> — tracking havolasi EMAS", () => {
+    // Tracking havolasi bekor qilinishi mumkin, username havolasi esa hech
+    // qachon eskirmaydi. Shuning uchun bu yerda botInviteLink ISHLATILMAYDI.
+    const panel = buildChannelStatsPanel(
+      chan({ username: "kino_kanal", botInviteLink: "https://t.me/+tracking" }),
+      stats()
+    );
+    expect(panel).toContain('href="https://t.me/kino_kanal"');
+    expect(panel).not.toContain('href="https://t.me/+tracking"');
+  });
+
+  it("username oldidagi @ ikki marta chiqmaydi", () => {
+    const panel = buildChannelStatsPanel(chan({ username: "@kino_kanal" }), stats());
+    expect(panel).toContain(">@kino_kanal</a>");
+    expect(panel).not.toContain("@@");
+  });
+
+  it("username yo'q bo'lsa havola alohida qatorda qoladi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({ username: null, inviteLink: "https://t.me/+XyZ", type: "PRIVATE" }),
+      stats()
+    );
+    expect(panel).toContain("Tur: <b>Maxfiy</b>\n<code>https://t.me/+XyZ</code>");
+    expect(panel).not.toContain("<a href=");
+  });
+
+  it("username ham, havola ham yo'q bo'lsa panel buzilmaydi", () => {
+    const panel = buildChannelStatsPanel(chan({ username: null, inviteLink: null }), stats());
+    expect(panel).toContain("(havola yo'q)");
+    expect(panel).not.toContain("<a href=");
+  });
+
   it("sarlavha HTML'dan xavfsiz (escape qilinadi)", () => {
     const panel = buildChannelStatsPanel(chan({ title: 'A & B <b>x</b> "q"' }), stats());
     expect(panel).not.toContain("A & B <b>");
