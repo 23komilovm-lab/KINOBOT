@@ -6,11 +6,13 @@ import { config, adminCan } from "../../config.js";
 import { ce, e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_BUTTONS,
-  ibtn,
   BE,
-  kb,
-  cancelKeyboard,
   adminMenuKeyboard,
+  backBtn,
+  cancelKeyboard,
+  homeBtn,
+  ibtn,
+  kb,
 } from "../../utils/keyboard.js";
 import { buttonStyleLabel, isValidUrl, resolveButtonStyle } from "../../utils/contentButton.js";
 import {
@@ -46,7 +48,7 @@ function serialMenu() {
       ibtn("O'chirish", "sr:del:0", "danger", BE.chDelete),
     ],
     [ibtn("Knopka boshqaruvi", "sr:btnlist:0")],
-    [ibtn("Menyuga qaytish", "sr:close", undefined, BE.backMenu)]
+    [homeBtn("sr:close")]
   );
 }
 
@@ -71,6 +73,8 @@ serialsHandler.callbackQuery("sr:close", async (ctx) => {
 // ============ SERIAL QO'SHISH ============
 serialsHandler.callbackQuery("sr:add", async (ctx) => {
   await ctx.answerCallbackQuery();
+  // Panel xabari olib tashlanadi — izoh `movies.ts` dagi `mv:add` da.
+  await ctx.deleteMessage().catch(() => {});
   await ctx.conversation.enter("addSerial");
 });
 
@@ -124,6 +128,8 @@ export async function addSerial(conversation: Conversation<MyContext>, ctx: MyCo
 // ============ QISM QO'SHISH ============
 serialsHandler.callbackQuery("sr:addep", async (ctx) => {
   await ctx.answerCallbackQuery();
+  // Panel xabari olib tashlanadi — izoh `movies.ts` dagi `mv:add` da.
+  await ctx.deleteMessage().catch(() => {});
   await ctx.conversation.enter("addEpisode");
 });
 
@@ -275,7 +281,9 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
       const c = await conversation.wait();
       if (isCancel(c.message?.text)) return stop(c);
       if ((c.message?.text?.trim() ?? "") === "+") break;
-      await c.reply("Almashtirish uchun <code>+</code> yuboring, bekor qilish uchun <code>❌ Bekor qilish</code>.");
+      await c.reply(
+        "Almashtirish uchun <code>+</code> yuboring, bekor qilish uchun <code>❌ Bekor qilish</code>."
+      );
     }
   }
 
@@ -319,7 +327,7 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   await ctx.reply("Yana qism qo'shasizmi?", {
     reply_markup: kb(
       [ibtn("➕ Yana qism qo'shish", "sr:addep", "success", BE.chAdd)],
-      [ibtn("🎞 Serial bo'limi", "sr:back", "primary", BE.backMenu)]
+      [ibtn("🎞 Serial bo'limi", "sr:back", "primary")]
     ),
   });
 }
@@ -382,7 +390,7 @@ async function renderSerialList(ctx: MyContext, page: number, delMode: boolean) 
   nav.push(ibtn(`${p + 1}/${pages}`, "noop:sr"));
   if (p < pages - 1) nav.push(ibtn("➡️", `${prefix}:${p + 1}`));
   rows.push(nav);
-  rows.push([ibtn("Orqaga", "sr:back", undefined, BE.home)]);
+  rows.push([backBtn("sr:back")]);
 
   await ctx
     .editMessageText(
@@ -413,7 +421,7 @@ serialsHandler.callbackQuery(/^sr:view:(\d+)$/, async (ctx) => {
       {
         reply_markup: kb(
           [ibtn("Knopkani tahrirlash", "sr:btnlist:0", "primary", BE.editName)],
-          [ibtn("Orqaga", "sr:list:0", undefined, BE.home)]
+          [backBtn("sr:list:0")]
         ),
       }
     )
@@ -465,7 +473,7 @@ async function renderGlobalSerialButtonEditor(ctx: MyContext, edit = true) {
       ibtn("🎨 Rangni tanlash", "sr:gbtncolors", "primary"),
       ibtn("O'chirish", "sr:gbtnclear", "danger", BE.chDelete),
     ],
-    [ibtn("Orqaga", "sr:back", undefined, BE.backMenu)]
+    [backBtn("sr:back")]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
@@ -495,7 +503,7 @@ serialsHandler.callbackQuery("sr:gbtncolors", async (ctx) => {
           ibtn("Qizil", "sr:gbtnsty:danger", "danger"),
           ibtn("Tasodifiy", "sr:gbtnsty:random", "success"),
         ],
-        [ibtn("Orqaga", "sr:btnlist:0", undefined, BE.backMenu)]
+        [backBtn("sr:btnlist:0")]
       ),
     })
     .catch(() => {});
@@ -601,10 +609,7 @@ serialsHandler.callbackQuery(/^sr:delconf:(\d+)$/, async (ctx) => {
   // O'chirilgach navigatsiyasiz o'lik matn qolmasin — ro'yxat/menyuga qaytish yo'li.
   await ctx
     .editMessageText("🗑 Serial o'chirildi.", {
-      reply_markup: kb([
-        ibtn("📺 Seriallar ro'yxati", "sr:list:0", "primary"),
-        ibtn("Orqaga", "sr:back", undefined, BE.home),
-      ]),
+      reply_markup: kb([ibtn("📺 Seriallar ro'yxati", "sr:list:0", "primary"), backBtn("sr:back")]),
     })
     .catch(() => {});
 });

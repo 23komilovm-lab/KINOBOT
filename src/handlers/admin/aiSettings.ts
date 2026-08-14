@@ -1,6 +1,6 @@
 import { Composer } from "grammy";
 import { adminCan } from "../../config.js";
-import { ibtn, kb, BE, BOT_SETTINGS_TEXT } from "../../utils/keyboard.js";
+import { BE, BOT_SETTINGS_TEXT, backBtn, ibtn, kb } from "../../utils/keyboard.js";
 import { getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import {
   PROVIDERS,
@@ -73,7 +73,7 @@ async function renderPanel(ctx: MyContext, edit: boolean) {
       ibtn("🛡 Admin modeli", "aiset:scope:a", "primary"),
     ],
     [ibtn("🔄 Yangilash", "aiset:open", "success")],
-    [ibtn("Orqaga", "botset:back", undefined, BE.backMenu)],
+    [backBtn("botset:back")],
   ];
   if (avail.length === 0) {
     lines.push("", "⚠️ Hech qanday AI provayder kaliti sozlanmagan.");
@@ -114,7 +114,7 @@ aiSettingsHandler.callbackQuery(/^aiset:scope:(u|a)$/, async (ctx) => {
     return [ibtn(p.label, `aiset:prov:${scope}:${idx}`, "primary")];
   });
   rows.push([ibtn("♻️ Avtomatik (fallback)", `aiset:auto:${scope}`, "success")]);
-  rows.push([ibtn("Orqaga", "aiset:open", undefined, BE.backMenu)]);
+  rows.push([backBtn("aiset:open")]);
 
   await ctx
     .editMessageText(`<b>${scopeLabel(scope)}</b> uchun provayderni tanlang:`, {
@@ -134,7 +134,7 @@ aiSettingsHandler.callbackQuery(/^aiset:prov:(u|a):(\d+)$/, async (ctx) => {
   const rows = p.models.map((m, mIdx) => [
     ibtn(m.label, `aiset:set:${scope}:${pIdx}:${mIdx}`, "primary"),
   ]);
-  rows.push([ibtn("Orqaga", `aiset:scope:${scope}`, undefined, BE.backMenu)]);
+  rows.push([backBtn(`aiset:scope:${scope}`)]);
 
   await ctx
     .editMessageText(`<b>${scopeLabel(scope)}</b> · <b>${p.label}</b>\n\nModelni tanlang:`, {

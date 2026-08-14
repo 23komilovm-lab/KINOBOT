@@ -149,6 +149,29 @@ so'rovli kanalda esa zayifka soni (kutayotgan/tasdiqlangan).
 `channel_invite_links` registrida **qoladi** — shu tufayli "eski havola orqali
 qancha, yangisi orqali qancha" ajratib ko'rinadi (`#1`, `#2`, … tartib raqamlari).
 
+### Navigatsiya tugmalari — yagona ko'rinish
+
+Admin panelning **hamma joyida** ikkita tugma, `utils/keyboard.ts` dagi
+yordamchilar orqali:
+
+| Tugma | Funksiya | Yordamchi |
+| --- | --- | --- |
+| `◀️ Orqaga` | shu bo'lim ichida bir qadam ortga | `backBtn(callbackData)` |
+| `◀️ Menyu` | bo'limdan chiqish (panel yopiladi, admin menyusi qaytadi) | `homeBtn(callbackData)` |
+
+`homeBtn` faqat `*:close` callback'lari uchun — ular `deleteMessage()` qilib
+`adminMenuKeyboard` ni qaytaradi. Qolgan hammasi `backBtn`. Reply-klaviaturadagi
+chiqish tugmasi (`BOT_SETTINGS_TEXT.back`) ham xuddi shu yozuv.
+
+⚠️ **Bu tugmalarda premium emoji ISHLATILMAYDI.** `BE.*` ID'lari boshqa botdan
+olingan va nomlariga mos kelmaydi — tekshirilgani: `BE.backMenu` aynan `fire`
+bilan bir xil ID (`5193202823411546657`), ya'ni har bir «Orqaga» tugmasida 🔥
+olov rasmi chiqib turardi; `ce("chart")` esa uy rasmini beradi. Oddiy emoji har
+qanday qurilmada, premium obunasiz ham to'g'ri ko'rinadi.
+
+Sahifalash tugmalari (`⬅️ Oldingi` / `Keyingi ➡️`) alohida — ular ekran emas,
+sahifa almashtiradi va `backBtn` ishlatmaydi.
+
 ### Panel matni — yig'iladigan izohlar
 
 Statistika panellari uzun tushuntirishlar bilan cho'zilib ketgan edi (~24 qator).

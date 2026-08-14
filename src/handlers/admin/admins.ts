@@ -13,6 +13,7 @@ import { e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_TEXT,
   adminMenuKeyboard,
+  backBtn,
   cancelKeyboard,
   ibtn,
   kb,
@@ -113,7 +114,7 @@ async function renderAdminMenu(ctx: MyContext, edit = false) {
     [ibtn("Telegramdan tanlash", "adm:telegram", "success")],
     [ibtn("ID yoki username orqali", "adm:add", "primary")],
     [ibtn("Adminlar ro'yxati", "adm:list:0", "primary")],
-    [ibtn("Orqaga", "botset:back")]
+    [backBtn("botset:back")]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
@@ -257,7 +258,7 @@ adminsHandler.callbackQuery(/^adm:list:(\d+)$/, async (ctx) => {
   if (pages > 1) nav.push(ibtn(`${page + 1}/${pages}`, "adm:noop"));
   if (page < pages - 1) nav.push(ibtn("➡️", `adm:list:${page + 1}`));
   if (nav.length) rows.push(nav);
-  rows.push([ibtn("Orqaga", "adm:menu")]);
+  rows.push([backBtn("adm:menu")]);
 
   await ctx
     .editMessageText(
@@ -298,7 +299,7 @@ async function renderAdminDetail(ctx: MyContext, id: bigint) {
         [ibtn("Huquqlarni sozlash", `adm:perms:${id}`, "primary")],
         [ibtn("Kanal limitini belgilash", `adm:limit:${id}`, "primary")],
         [ibtn("Adminlikdan olish", `adm:remove:${id}`, "danger")],
-        [ibtn("Orqaga", "adm:list:0")]
+        [backBtn("adm:list:0")]
       ),
     })
     .catch(() => {});
@@ -332,7 +333,7 @@ async function renderPermsEditor(ctx: MyContext, id: bigint) {
     ibtn("Hammasini yoqish", `adm:permall:${id}`, "success"),
     ibtn("Hammasini o'chirish", `adm:permnone:${id}`, "danger"),
   ]);
-  rows.push([ibtn("Orqaga", `adm:view:${id}`)]);
+  rows.push([backBtn(`adm:view:${id}`)]);
 
   await ctx
     .editMessageText(`<b>Huquqlarni sozlash</b>\n\nHar bir bo'limni yoqing/o'chiring:`, {
@@ -435,7 +436,7 @@ adminsHandler.callbackQuery(/^adm:remove:(\d+)$/, async (ctx) => {
   if (ok) {
     await ctx
       .editMessageText(`<code>${id}</code> adminlikdan olindi.`, {
-        reply_markup: kb([ibtn("Orqaga", "adm:list:0")]),
+        reply_markup: kb([backBtn("adm:list:0")]),
       })
       .catch(() => {});
   }

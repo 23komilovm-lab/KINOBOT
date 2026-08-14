@@ -1,7 +1,7 @@
 import { Composer } from "grammy";
 import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
-import { ibtn, BE, kb, cancelKeyboard } from "../../utils/keyboard.js";
+import { BE, backBtn, cancelKeyboard, ibtn, kb } from "../../utils/keyboard.js";
 import { todayUz, dayStartUz } from "../../utils/dateRange.js";
 import { countDistinctBotJoins } from "../../utils/channelStats.js";
 import type { MyContext } from "../../types.js";
@@ -39,7 +39,7 @@ async function renderStats(ctx: MyContext, edit = true, messageId?: number) {
 
   if (channels.length === 0) {
     const text = "📊 <b>So'rovlar statistikasi</b>\n\nSo'rovli kanal qo'shilmagan.";
-    const markup = kb([ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]);
+    const markup = kb([backBtn("ch:menu")]);
     await sendPanel(ctx, text, markup, edit, messageId);
     return;
   }
@@ -90,10 +90,7 @@ async function renderStats(ctx: MyContext, edit = true, messageId?: number) {
     }
   }
 
-  rows.push([
-    ibtn("🔄 Yangilash", "ch:jrstats", "primary"),
-    ibtn("Orqaga", "ch:menu", undefined, BE.backMenu),
-  ]);
+  rows.push([ibtn("🔄 Yangilash", "ch:jrstats", "primary"), backBtn("ch:menu")]);
 
   const text =
     `📊 <b>So'rovlar statistikasi</b>\n\n${lines.join("\n\n")}\n\n` +
@@ -161,7 +158,7 @@ joinStatsHandler.callbackQuery(/^jr:menu:(-?\d+)$/, async (ctx) => {
           ],
           [ibtn(`✅ Hammasini (${pending})`, `jr:approve:${channelId}:all`, "success", BE.check)],
           [ibtn("✏️ Sonini yozib qabul qilish", `jr:approvecustom:${channelId}`, "primary")],
-          [ibtn("Orqaga", "ch:jrstats", undefined, BE.backMenu)]
+          [backBtn("ch:jrstats")]
         ),
       }
     )

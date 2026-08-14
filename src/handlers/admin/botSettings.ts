@@ -29,7 +29,10 @@ botSettingsHandler.hears(ADMIN_MENU_BUTTONS.botSettings, async (ctx) => {
   await ctx.reply(HEAD, { reply_markup: botSettingsKeyboard(uid) });
 });
 
-botSettingsHandler.hears(BOT_SETTINGS_TEXT.back, async (ctx) => {
+// Eski yozuv ham qabul qilinadi: deploy paytida ekranda turgan klaviatura
+// hamon "Menyuga qaytish" bo'lishi mumkin va u bosilganda hech narsa
+// bo'lmasligi kerak emas. Yangi klaviatura keyingi ochilishda keladi.
+botSettingsHandler.hears([BOT_SETTINGS_TEXT.back, "Menyuga qaytish"], async (ctx) => {
   const uid = ctx.from!.id;
   if (!canAny(uid)) return;
   await ctx.reply("Admin panel:", { reply_markup: adminMenuKeyboard(uid) });

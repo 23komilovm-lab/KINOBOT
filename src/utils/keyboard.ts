@@ -68,6 +68,28 @@ export function ibtn(text: string, data: string, style?: BtnStyle, emojiId?: str
   };
 }
 
+// ===================== NAVIGATSIYA TUGMALARI =====================
+// Butun panelda YAGONA ko'rinish. Ilgari har bo'limda har xil edi: "Orqaga"
+// ba'zan `BE.backMenu`, ba'zan `BE.home`, ba'zan emojisiz; "Menyuga qaytish"
+// esa goh chiqish, goh bir qadam ortga uchun ishlatilardi.
+//
+// PREMIUM EMOJI ATAYLAB ISHLATILMAYDI. `BE.*` ID'lari boshqa botdan olingan va
+// nomlariga MOS KELMAYDI — `BE.backMenu` aynan `fire` bilan bir xil ID
+// (5193202823411546657), ya'ni "Orqaga" tugmasida 🔥 olov rasmi chiqib turardi.
+// Oddiy emoji har qanday qurilmada, premium obunasiz ham to'g'ri ko'rinadi.
+
+/** Bir qadam ortga — shu bo'lim ichida oldingi ekranga. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function backBtn(data: string): any {
+  return ibtn("◀️ Orqaga", data);
+}
+
+/** Bo'limdan chiqish — inline panel yopiladi va admin menyusi qaytadi. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function homeBtn(data: string): any {
+  return ibtn("◀️ Menyu", data);
+}
+
 /** Raw inline keyboard — style qo'llab-quvvatlaydi */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function kb(...rows: any[][]): any {
@@ -140,7 +162,9 @@ export const BOT_SETTINGS_TEXT = {
   ai: "AI sozlamalari",
   backup: "Backup",
   funnel: "Funnel",
-  back: "Menyuga qaytish",
+  // Inline `homeBtn` bilan bir xil yozuv — admin panelning hamma joyida
+  // bo'limdan chiqish bitta ko'rinishda.
+  back: "◀️ Menyu",
 } as const;
 
 /** "Bot sozlamalari" bosilganda chiqadigan doimiy (reply) sub-menyu — oddiy, rangsiz tugmalar */
@@ -161,7 +185,8 @@ export function botSettingsKeyboard(userId?: number | bigint): Keyboard {
   if (adminCan(userId ?? 0, "funnel")) add(BOT_SETTINGS_TEXT.funnel, BE.trend);
   if (col % 2 !== 0) kb.row();
 
-  kb.text(BOT_SETTINGS_TEXT.back, { icon_custom_emoji_id: BE.backMenu }).row();
+  // Premium emojisiz — emoji matnning o'zida (inline `homeBtn` bilan bir xil).
+  kb.text(BOT_SETTINGS_TEXT.back).row();
 
   return kb.resized();
 }
@@ -170,15 +195,13 @@ export function botSettingsKeyboard(userId?: number | bigint): Keyboard {
 // Reply (doimiy) klaviaturada FAQAT "AI yordamchi" qoladi — qidiruv (matn
 // yozib), referal, mashhur va random kinolar endi / komandalar orqali.
 export function userMenuKeyboard(): Keyboard {
-  return (
-    new Keyboard()
-      .text("AI yordamchi", {
-        icon_custom_emoji_id: "5258093637450866522",
-        style: "primary",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
-      .resized()
-  );
+  return new Keyboard()
+    .text("AI yordamchi", {
+      icon_custom_emoji_id: "5258093637450866522",
+      style: "primary",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    .resized();
 }
 
 /** AI suhbati davomida ko'rinadigan doimiy klaviatura — faqat chiqish tugmasi */

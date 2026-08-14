@@ -6,11 +6,13 @@ import { config, adminCan } from "../../config.js";
 import { ce, e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_BUTTONS,
-  ibtn,
   BE,
-  kb,
-  cancelKeyboard,
   adminMenuKeyboard,
+  backBtn,
+  cancelKeyboard,
+  homeBtn,
+  ibtn,
+  kb,
 } from "../../utils/keyboard.js";
 import { buttonStyleLabel, isValidUrl, resolveButtonStyle } from "../../utils/contentButton.js";
 import {
@@ -65,7 +67,7 @@ function movieMenu() {
       ibtn("O'chirish", "mv:del:0", "danger", BE.chDelete),
     ],
     [ibtn("📲 Keyingi xabar (post)", "mv:pdmenu", "primary")],
-    [ibtn("Menyuga qaytish", "mv:close", undefined, BE.backMenu)]
+    [homeBtn("mv:close")]
   );
 }
 
@@ -89,6 +91,10 @@ moviesHandler.callbackQuery("mv:close", async (ctx) => {
 
 moviesHandler.callbackQuery("mv:add", async (ctx) => {
   await ctx.answerCallbackQuery();
+  // Panel xabari OLIB TASHLANADI. Aks holda qo'shish oqimi ustida
+  // "Kino qo'shish / Ro'yxat / O'chirish" tugmalari osilib turadi: chalg'itadi
+  // va oqim o'rtasida tasodifan bosilishi mumkin.
+  await ctx.deleteMessage().catch(() => {});
   await ctx.conversation.enter("addMovie");
 });
 
@@ -381,7 +387,7 @@ async function renderList(ctx: MyContext, page: number, delMode: boolean) {
   nav.push(ibtn(`${p + 1}/${pages}`, "noop"));
   if (p < pages - 1) nav.push(ibtn("➡️", `${prefix}:${p + 1}`));
   rows.push(nav);
-  rows.push([ibtn("Orqaga", "mv:back", undefined, BE.home)]);
+  rows.push([backBtn("mv:back")]);
 
   await ctx
     .editMessageText(
@@ -442,7 +448,7 @@ async function renderGlobalMovieButtonEditor(ctx: MyContext, edit = true) {
       ibtn("🎨 Rangni tanlash", "mv:gbtncolors", "primary"),
       ibtn("O'chirish", "mv:gbtnclear", "danger", BE.chDelete),
     ],
-    [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)]
+    [backBtn("mv:back")]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
@@ -473,7 +479,7 @@ moviesHandler.callbackQuery("mv:gbtncolors", async (ctx) => {
           ibtn("Qizil", "mv:gbtnsty:danger", "danger"),
           ibtn("Tasodifiy", "mv:gbtnsty:random", "success"),
         ],
-        [ibtn("Orqaga", "mv:btnlist:0", undefined, BE.backMenu)]
+        [backBtn("mv:btnlist:0")]
       ),
     })
     .catch(() => {});
@@ -569,7 +575,7 @@ async function renderPostDeliveryEditor(ctx: MyContext, edit = true) {
       ibtn("🎨 Rangni tanlash", "mv:pdbtncolors", "primary"),
       ibtn("Hammasini tozalash", "mv:pdclear", "danger", BE.chDelete),
     ],
-    [ibtn("Orqaga", "mv:back", undefined, BE.backMenu)]
+    [backBtn("mv:back")]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz — izoh yuqoridagi
@@ -643,7 +649,7 @@ moviesHandler.callbackQuery("mv:pdbtncolors", async (ctx) => {
           ibtn("Qizil", "mv:pdbtnsty:danger", "danger"),
           ibtn("Tasodifiy", "mv:pdbtnsty:random", "success"),
         ],
-        [ibtn("Orqaga", "mv:pdmenu", undefined, BE.backMenu)]
+        [backBtn("mv:pdmenu")]
       ),
     })
     .catch(() => {});
@@ -758,12 +764,15 @@ moviesHandler.callbackQuery(/^mv:view:(\d+)$/, async (ctx) => {
 // Tasdiqlash qadami (mv:view video ekranidan)
 moviesHandler.callbackQuery(/^mv:delask:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
-  await ctx.reply(`Haqiqatan <b>${e.escapeHtml((await prisma.movie.findUnique({ where: { id: Number(ctx.match[1]) } }))?.title ?? "bu kino")}</b> o'chirilsinmi?`, {
-    reply_markup: kb([
-      ibtn("🗑 Ha, o'chirish", `mv:delconf:${ctx.match[1]}`, "danger"),
-      ibtn("Yo'q", `mv:delno:${ctx.match[1]}`, "primary"),
-    ]),
-  });
+  await ctx.reply(
+    `Haqiqatan <b>${e.escapeHtml((await prisma.movie.findUnique({ where: { id: Number(ctx.match[1]) } }))?.title ?? "bu kino")}</b> o'chirilsinmi?`,
+    {
+      reply_markup: kb([
+        ibtn("🗑 Ha, o'chirish", `mv:delconf:${ctx.match[1]}`, "danger"),
+        ibtn("Yo'q", `mv:delno:${ctx.match[1]}`, "primary"),
+      ]),
+    }
+  );
 });
 
 moviesHandler.callbackQuery(/^mv:delno:(\d+)$/, async (ctx) => {
@@ -786,10 +795,7 @@ moviesHandler.callbackQuery(/^mv:delconf:(\d+)$/, async (ctx) => {
   // O'chirilgach navigatsiyasiz o'lik matn qolmasin — ro'yxat/menyuga qaytish yo'li.
   await ctx
     .editMessageText("🗑 Kino o'chirildi.", {
-      reply_markup: kb([
-        ibtn("🎬 Kino ro'yxati", "mv:list:0", "primary"),
-        ibtn("Orqaga", "mv:back", undefined, BE.home),
-      ]),
+      reply_markup: kb([ibtn("🎬 Kino ro'yxati", "mv:list:0", "primary"), backBtn("mv:back")]),
     })
     .catch(() => {});
 });

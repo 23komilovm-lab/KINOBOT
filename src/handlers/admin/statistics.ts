@@ -44,8 +44,11 @@ async function buildOverview(): Promise<string> {
         .join("\n");
   }
 
+  // Sarlavhada premium emoji YO'Q: `ce("chart")` ID'si (5257963315258204021)
+  // Telegram'da uy rasmini ko'rsatadi — ID'lar boshqa botdan olingan va
+  // nomlariga mos kelmaydi (emoji.ts izohiga qarang).
   return (
-    `${ce("chart")} <b>Bot statistikasi</b>\n` +
+    `<b>Bot statistikasi</b>\n` +
     `━━━━━━━━━━━━━━━\n` +
     `${ce("stats")} Foydalanuvchilar: <b>${users}</b>\n` +
     `${ce("blocked")} Bloklangan: <b>${blocked}</b>\n` +

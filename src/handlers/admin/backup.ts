@@ -1,7 +1,7 @@
 import { Composer } from "grammy";
 import { prisma } from "../../prisma.js";
 import { config, adminCan, isOwner, syncAdminStateFromDb } from "../../config.js";
-import { ADMIN_MENU_BUTTONS, ibtn, BE, kb } from "../../utils/keyboard.js";
+import { ADMIN_MENU_BUTTONS, BE, backBtn, ibtn, kb } from "../../utils/keyboard.js";
 import { clearSettingsCache, getBool, setBool, KEYS } from "../../utils/settings.js";
 import { buildBackupFile, fetchAndParseBackup } from "../../services/autoBackup.js";
 import { normalizeTitle } from "../../utils/translit.js";
@@ -23,7 +23,7 @@ async function backupMenuWithBack() {
         auto ? "success" : "danger"
       ),
     ],
-    [ibtn("Orqaga", "botset:back", undefined, BE.backMenu)]
+    [backBtn("botset:back")]
   );
 }
 

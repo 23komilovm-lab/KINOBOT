@@ -5,11 +5,11 @@ import { e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_BUTTONS,
   adminMenuKeyboard,
+  backBtn,
   cancelKeyboard,
   contactAdminKb,
   ibtn,
   kb,
-  BE,
 } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
 import { grantPremium, seedDefaultTariffs, resetToDefaultTariffs } from "../../utils/premium.js";
@@ -62,7 +62,7 @@ async function menuData() {
     [ibtn(`📺 Premium seriallar (${premSerials})`, "prm:serials:0", "primary")],
     [ibtn("🎁 Qo'lda premium berish", "prm:grant", "success")],
     [ibtn("👥 Premium foydalanuvchilar", "prm:users:0", "primary")],
-    [ibtn("Orqaga", "botset:back", undefined, BE.backMenu)]
+    [backBtn("botset:back")]
   );
   return { text, markup };
 }
@@ -100,7 +100,7 @@ async function renderPremiumMovies(ctx: MyContext, page: number) {
   rows.push([ibtn("➕ Kod bo'yicha qo'shish", "prm:madd", "success")]);
   rows.push([ibtn("🔥 Eng ko'p ko'rilganlarni qo'shish", "prm:mtop", "primary")]);
   if (total > 0) rows.push([ibtn("🔓 Hammasini bo'shatish", "prm:mclear", "danger")]);
-  rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("prm:menu")]);
 
   const text =
     `🎬 <b>Premium kinolar</b> (${total})\n\n${lines}\n\n` +
@@ -149,7 +149,7 @@ premiumAdminHandler.callbackQuery("prm:mtop", async (ctx) => {
             ibtn("Top 10", "prm:mtopn:10", "primary"),
             ibtn("Top 20", "prm:mtopn:20", "primary"),
           ],
-          [ibtn("Orqaga", "prm:movies:0", undefined, BE.backMenu)]
+          [backBtn("prm:movies:0")]
         ),
       }
     )
@@ -215,7 +215,7 @@ async function renderPremiumSerials(ctx: MyContext, page: number) {
   rows.push([ibtn("➕ Kod bo'yicha qo'shish", "prm:sadd", "success")]);
   rows.push([ibtn("🔥 Eng ko'p ko'rilganlarni qo'shish", "prm:stop", "primary")]);
   if (total > 0) rows.push([ibtn("🔓 Hammasini bo'shatish", "prm:sclear", "danger")]);
-  rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("prm:menu")]);
 
   const text =
     `📺 <b>Premium seriallar</b> (${total})\n\n${lines}\n\n` +
@@ -264,7 +264,7 @@ premiumAdminHandler.callbackQuery("prm:stop", async (ctx) => {
             ibtn("Top 10", "prm:stopn:10", "primary"),
             ibtn("Top 20", "prm:stopn:20", "primary"),
           ],
-          [ibtn("Orqaga", "prm:serials:0", undefined, BE.backMenu)]
+          [backBtn("prm:serials:0")]
         ),
       }
     )
@@ -332,7 +332,7 @@ premiumAdminHandler.callbackQuery(/^prm:pending:(\d+)$/, async (ctx) => {
   if (items.length === 0) {
     await ctx
       .editMessageText("✅ Kutilayotgan to'lov yo'q.", {
-        reply_markup: kb([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]),
+        reply_markup: kb([backBtn("prm:menu")]),
       })
       .catch(() => {});
     return;
@@ -351,7 +351,7 @@ premiumAdminHandler.callbackQuery(/^prm:pending:(\d+)$/, async (ctx) => {
   if (pages > 1) nav.push(ibtn(`${page + 1}/${pages}`, "noop:prm"));
   if (page < pages - 1) nav.push(ibtn("➡️", `prm:pending:${page + 1}`));
   if (nav.length) rows.push(nav);
-  rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("prm:menu")]);
 
   await ctx
     .editMessageText(`💳 <b>Kutilayotgan to'lovlar</b> (${total}):`, { reply_markup: kb(...rows) })
@@ -387,9 +387,9 @@ premiumAdminHandler.callbackQuery(/^prm:pay:(\d+)$/, async (ctx) => {
             ibtn("✅ Tasdiqlash", `prm:approve:${p.id}`, "success"),
             ibtn("❌ Rad etish", `prm:reject:${p.id}`, "danger"),
           ],
-          [ibtn("Orqaga", "prm:pending:0", undefined, BE.backMenu)],
+          [backBtn("prm:pending:0")],
         ]
-      : [[ibtn("Orqaga", "prm:pending:0", undefined, BE.backMenu)]];
+      : [[backBtn("prm:pending:0")]];
 
   // Chek rasmini alohida yuboramiz
   if (p.proofFileId) {
@@ -523,7 +523,7 @@ async function renderTariffs(ctx: MyContext) {
   if (tariffs.some((t) => !t.starsPrice)) {
     rows.push([ibtn("⭐ Stars narxlarini avtomatik belgilash", "prm:tstarsauto", "success")]);
   }
-  rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("prm:menu")]);
   await ctx
     .editMessageText(
       `🏷 <b>Tariflar</b>\n\n${lines}\n\n` +
@@ -666,7 +666,7 @@ async function settingsData() {
         warn ? "success" : "danger"
       ),
     ],
-    [ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]
+    [backBtn("prm:menu")]
   );
   return { text, markup };
 }
@@ -780,7 +780,7 @@ premiumAdminHandler.callbackQuery(/^prm:users:(\d+)$/, async (ctx) => {
   if (pages > 1) nav.push(ibtn(`${page + 1}/${pages}`, "noop:prm"));
   if (page < pages - 1) nav.push(ibtn("➡️", `prm:users:${page + 1}`));
   const rows = nav.length ? [nav] : [];
-  rows.push([ibtn("Orqaga", "prm:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("prm:menu")]);
 
   await ctx
     .editMessageText(`👥 <b>Premium foydalanuvchilar</b> (${total}):\n\n${lines}`, {

@@ -4,10 +4,12 @@ import { prisma } from "../../prisma.js";
 import { ce, e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_BUTTONS,
+  BE,
   BOT_SETTINGS_TEXT,
   adminMenuKeyboard,
+  backBtn,
+  homeBtn,
   ibtn,
-  BE,
   kb,
 } from "../../utils/keyboard.js";
 import { resolveButtonStyle } from "../../utils/contentButton.js";
@@ -111,7 +113,7 @@ function broadcastMenu() {
       ibtn("🗂 Yuborishlar tarixi", "bc:history:0", "primary"),
     ],
     [ibtn("♻️ Bloklanganlar ro'yxatini tiklash", "bc:unblock", "primary")],
-    [ibtn("Menyuga qaytish", "bc:close", undefined, BE.backMenu)]
+    [homeBtn("bc:close")]
   );
 }
 
@@ -499,7 +501,7 @@ broadcastHandler.callbackQuery("bc:confirm", async (ctx) => {
   if (users.length === 0) {
     await ctx
       .editMessageText("⚠️ <b>Bu nishonda birorta ham foydalanuvchi yo'q.</b>", {
-        reply_markup: kb([ibtn("Orqaga", "bc:menu", undefined, BE.backMenu)]),
+        reply_markup: kb([backBtn("bc:menu")]),
       })
       .catch(() => {});
     return;
@@ -520,7 +522,7 @@ broadcastHandler.callbackQuery("bc:confirm", async (ctx) => {
       {
         reply_markup: kb(
           [ibtn(`✅ Ha, ${users.length} kishiga yuborish`, "bc:send", "success", BE.check)],
-          [ibtn("Orqaga", "bc:preview", undefined, BE.backMenu)],
+          [backBtn("bc:preview")],
           [ibtn("❌ Bekor qilish", "bc:menu", "danger")]
         ),
       }
@@ -672,7 +674,7 @@ async function runBroadcast(
       record = await saveBroadcastRecord(bcast, result);
     }
 
-    const rows = [[ibtn("Menyuga qaytish", "bc:menu", "primary", BE.backMenu)]];
+    const rows = [[backBtn("bc:menu")]];
     if (record && result.failedIds.length > 0) {
       rows.unshift([
         ibtn(
@@ -784,7 +786,7 @@ broadcastHandler.callbackQuery(/^bc:history:(\d+)$/, async (ctx) => {
   if (pages > 1) nav.push(ibtn(`${page + 1}/${pages}`, "bc:noop"));
   if (page < pages - 1) nav.push(ibtn("➡️", `bc:history:${page + 1}`));
   if (nav.length) rows.push(nav);
-  rows.push([ibtn("Orqaga", "bc:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("bc:menu")]);
 
   await ctx
     .editMessageText(
@@ -845,7 +847,7 @@ broadcastHandler.callbackQuery(/^bc:hist:(\d+)$/, async (ctx) => {
   } else if (failedIds.length > 0) {
     rows.push([ibtn("🔁 Shablon saqlanmagan — qayta yuborib bo'lmaydi", "bc:noop")]);
   }
-  rows.push([ibtn("Orqaga", "bc:history:0", undefined, BE.backMenu)]);
+  rows.push([backBtn("bc:history:0")]);
 
   await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
 });
@@ -970,7 +972,7 @@ broadcastHandler.callbackQuery(/^bc:retry:(\d+)$/, async (ctx) => {
 
       await setStatus(
         `${ce("check")} <b>Qayta yuborish tugadi!</b>\n\n${formatBulkResult(result)}`,
-        kb([ibtn("Tarixga", "bc:history:0", "primary", BE.backMenu)])
+        kb([ibtn("Tarixga", "bc:history:0", "primary")])
       );
     } catch (err) {
       console.error("🛑 Qayta yuborish xatosi:", err);
@@ -1028,7 +1030,7 @@ broadcastHandler.callbackQuery("bc:unblock:yes", async (ctx) => {
   });
   await ctx
     .editMessageText(`${ce("check")} <b>${res.count}</b> ta foydalanuvchi ro'yxatga qaytarildi.`, {
-      reply_markup: kb([ibtn("Menyuga qaytish", "bc:menu", "primary", BE.backMenu)]),
+      reply_markup: kb([backBtn("bc:menu")]),
     })
     .catch(() => {});
 });

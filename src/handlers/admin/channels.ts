@@ -5,10 +5,12 @@ import { prisma } from "../../prisma.js";
 import { ce, e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_BUTTONS,
-  adminMenuKeyboard,
-  cancelKeyboard,
-  ibtn,
   BE,
+  adminMenuKeyboard,
+  backBtn,
+  cancelKeyboard,
+  homeBtn,
+  ibtn,
   kb,
 } from "../../utils/keyboard.js";
 import { getBool, setBool, getSetting, setSetting, KEYS } from "../../utils/settings.js";
@@ -139,7 +141,7 @@ async function channelMenuData() {
       ibtn("🎨 Knopka sozlamalari", "ch:btnsettings", "primary"),
       ibtn("So'rovlar", "ch:jrstats", "primary", BE.stats),
     ],
-    [ibtn("Menyuga qaytish", "ch:close", undefined, BE.backMenu)]
+    [homeBtn("ch:close")]
   );
 
   return { text, markup };
@@ -199,7 +201,7 @@ async function renderChannelList(ctx: MyContext) {
   if (channels.length === 0) {
     await ctx
       .editMessageText("📭 Hozircha kanal qo'shilmagan.", {
-        reply_markup: kb([ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]),
+        reply_markup: kb([backBtn("ch:menu")]),
       })
       .catch(() => {});
     return;
@@ -212,7 +214,7 @@ async function renderChannelList(ctx: MyContext) {
       c.isActive ? "success" : "danger"
     ),
   ]);
-  rows.push([ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("ch:menu")]);
 
   await ctx
     .editMessageText(
@@ -560,7 +562,7 @@ async function renderChannelDetail(ctx: MyContext, id: number, opts: { recheck?:
   // O'CHIRISH TUGMASI BU YERDA ATAYLAB YO'Q. Statistikani ko'rish oqimida
   // "danger" tugma yonma-yon turishi tasodifiy bosishga olib keladi. O'chirish
   // faqat "Kanal boshqaruvi → O'chirish" menyusi orqali (ch:del → ch:delconf).
-  rows.push([ibtn("Orqaga", "ch:list", undefined, BE.backMenu)]);
+  rows.push([backBtn("ch:list")]);
 
   await ctx.editMessageText(text, { reply_markup: kb(...rows) }).catch(() => {});
 }
@@ -593,7 +595,7 @@ async function renderInviteLinks(ctx: MyContext, id: number) {
       // eski havolani o'ldiradi — odamlar "havola yaroqsiz" xabarini oladi.
       reply_markup: kb(
         [ibtn("🔄 Yangilash", `ch:links:${id}`, "primary")],
-        [ibtn("Orqaga", `ch:view:${id}`, undefined, BE.backMenu)]
+        [backBtn(`ch:view:${id}`)]
       ),
     })
     .catch(() => {});
@@ -694,7 +696,7 @@ channelsHandler.callbackQuery(/^ch:newlinkask:(\d+)$/, async (ctx) => {
       {
         reply_markup: kb(
           [ibtn("Ha, yangisini yarat", `ch:newlink:${id}`, "danger")],
-          [ibtn("Bekor qilish", `ch:view:${id}`, "success", BE.backMenu)]
+          [ibtn("Bekor qilish", `ch:view:${id}`, "success")]
         ),
       }
     )
@@ -813,7 +815,7 @@ async function renderBtnSettings(ctx: MyContext, edit = true) {
       ibtn("Tasodifiy", "ch:subbtnsty:random", "success"),
     ],
     [ibtn("Standartga qaytarish", "ch:subbtnreset", "danger")],
-    [ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]
+    [backBtn("ch:menu")]
   );
 
   // Panelni bitta xabar sifatida ushlab turamiz: matn-kutish oqimidan keyin
@@ -903,7 +905,7 @@ channelsHandler.callbackQuery("ch:add", async (ctx) => {
             ibtn("So'rovli", "ch:type:REQUEST", "danger", "5258419835922030550"),
             ibtn("Instagram/boshqa", "ch:type:INSTAGRAM", "primary", "5258205968025525531"),
           ],
-          [ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]
+          [backBtn("ch:menu")]
         ),
       }
     )
@@ -1317,7 +1319,7 @@ async function processChannelInfo(ctx: MyContext, info: PendingChannel) {
       {
         reply_markup: kb(
           [ibtn("🔗 Avtomatik yaratish", "ch:autoinvite", "success", BE.chAdd)],
-          [ibtn("❌ Bekor qilish", "ch:cancelinvite", "danger", BE.backMenu)]
+          [ibtn("❌ Bekor qilish", "ch:cancelinvite", "danger")]
         ),
       }
     );
@@ -1457,7 +1459,7 @@ async function renderDeleteList(ctx: MyContext): Promise<boolean> {
   const channels = await prisma.channel.findMany({ orderBy: { sortOrder: "asc" } });
   if (channels.length === 0) return false;
   const rows = channels.map((c) => [ibtn(c.title, `ch:delconf:${c.id}`, "danger", BE.chDelete)]);
-  rows.push([ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("ch:menu")]);
   await ctx
     .editMessageText(`<b>Qaysi kanalni o'chirasiz?</b>`, { reply_markup: kb(...rows) })
     .catch(() => {});

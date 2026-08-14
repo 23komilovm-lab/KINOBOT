@@ -2,7 +2,14 @@ import { Composer } from "grammy";
 import { adminCan } from "../../config.js";
 import { prisma } from "../../prisma.js";
 import { ce, e } from "../../utils/emoji.js";
-import { ADMIN_MENU_BUTTONS, ibtn, BE, kb, adminMenuKeyboard } from "../../utils/keyboard.js";
+import {
+  ADMIN_MENU_BUTTONS,
+  BE,
+  adminMenuKeyboard,
+  backBtn,
+  ibtn,
+  kb,
+} from "../../utils/keyboard.js";
 import { getBool, setBool, KEYS } from "../../utils/settings.js";
 import { UZ_REGIONS } from "../../utils/regions.js";
 import { formatYmd, parseYmd, rangeFromStrings } from "../../utils/dateRange.js";
@@ -132,7 +139,7 @@ async function funnelMenu() {
       ),
     ],
     [ibtn("O'chirish", "fn:delete:0", "danger", BE.chDelete)],
-    [ibtn("Orqaga", "bc:menu", undefined, BE.backMenu)]
+    [backBtn("bc:menu")]
   );
 }
 
@@ -175,7 +182,7 @@ funnelHandler.callbackQuery("fn:defaultcreate", async (ctx) => {
               BE.broadcast
             ),
           ],
-          [ibtn("Menyuga qaytish", "fn:menu", "primary", BE.backMenu)]
+          [backBtn("fn:menu")]
         ),
       })
       .catch(() => {});
@@ -222,7 +229,7 @@ funnelHandler.callbackQuery("fn:defaultcreate", async (ctx) => {
       {
         reply_markup: kb(
           [ibtn("▶️ Hozir yuborish", `fn:sendsurvey:${regionSurvey.id}`, "success", BE.broadcast)],
-          [ibtn("Menyuga qaytish", "fn:menu", "primary", BE.backMenu)]
+          [backBtn("fn:menu")]
         ),
       }
     )
@@ -289,7 +296,7 @@ async function renderSurveyPicker(ctx: MyContext, mode: SurveyPickerMode, page: 
   nav.push(ibtn(`${p + 1}/${pages}`, "noop:fn"));
   if (p < pages - 1) nav.push(ibtn("➡️", `fn:${mode}:${p + 1}`));
   rows.push(nav);
-  rows.push([ibtn("Orqaga", "fn:menu", undefined, BE.backMenu)]);
+  rows.push([backBtn("fn:menu")]);
 
   const titles: Record<SurveyPickerMode, string> = {
     stat: "<b>Qaysi so'rovnoma natijasi?</b>",
@@ -345,7 +352,7 @@ funnelHandler.callbackQuery(/^fn:stat:(\d+)$/, async (ctx) => {
     .editMessageText(lines.join("\n"), {
       reply_markup: kb(
         [ibtn("Viloyat bo'yicha", `fn:statregion:${survey.id}`, "primary", BE.trend)],
-        [ibtn("Orqaga", "fn:stat:0", undefined, BE.backMenu)]
+        [backBtn("fn:stat:0")]
       ),
     })
     .catch(() => {});
@@ -386,7 +393,7 @@ funnelHandler.callbackQuery(/^fn:statregion:(\d+)$/, async (ctx) => {
 
   await ctx
     .editMessageText(lines.join("\n"), {
-      reply_markup: kb([ibtn("Orqaga", `fn:stat:${surveyId}`, undefined, BE.backMenu)]),
+      reply_markup: kb([backBtn(`fn:stat:${surveyId}`)]),
     })
     .catch(() => {});
 });
@@ -404,7 +411,7 @@ funnelHandler.callbackQuery(/^fn:sendsurvey:(\d+)$/, async (ctx) => {
         [ibtn("🧪 Sinov (faqat menga)", `fn:dosend:me`, "success")],
         [ibtn(`Hammaga (${count})`, `fn:dosend:all`, "primary", BE.stats)],
         [ibtn("Sana oralig'i bo'yicha", `fn:dosend:daterange`, "primary")],
-        [ibtn("Orqaga", "fn:send:0", undefined, BE.backMenu)]
+        [backBtn("fn:send:0")]
       ),
     })
     .catch(() => {});
@@ -573,7 +580,7 @@ funnelHandler.callbackQuery(/^fn:delconf:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "O'chirildi." });
   await ctx
     .editMessageText("So'rovnoma o'chirildi.", {
-      reply_markup: kb([ibtn("Orqaga", "fn:menu", undefined, BE.backMenu)]),
+      reply_markup: kb([backBtn("fn:menu")]),
     })
     .catch(() => {});
 });
@@ -728,7 +735,7 @@ async function saveSurvey(ctx: MyContext, f: FData) {
     {
       reply_markup: kb(
         [ibtn("Hozir yuborish", `fn:sendsurvey:${survey.id}`, "success", BE.broadcast)],
-        [ibtn("Menyuga qaytish", "fn:menu", "primary", BE.backMenu)]
+        [backBtn("fn:menu")]
       ),
     }
   );

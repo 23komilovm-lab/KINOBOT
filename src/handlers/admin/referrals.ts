@@ -4,10 +4,12 @@ import { prisma } from "../../prisma.js";
 import { e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_BUTTONS,
-  adminMenuKeyboard,
-  cancelKeyboard,
-  ibtn,
   BE,
+  adminMenuKeyboard,
+  backBtn,
+  cancelKeyboard,
+  homeBtn,
+  ibtn,
   kb,
 } from "../../utils/keyboard.js";
 import { setSetting, KEYS } from "../../utils/settings.js";
@@ -44,7 +46,7 @@ async function renderTop(ctx: MyContext, page: number, edit: boolean) {
 
   if (grouped.length === 0) {
     const text = `<tg-emoji emoji-id="${BE.users}">👥</tg-emoji> <b>Referal bo'lim</b>\n\nHozircha referal yo'q.`;
-    const markup = kb([ibtn("Menyuga qaytish", "ref:close", undefined, BE.backMenu)]);
+    const markup = kb([homeBtn("ref:close")]);
     if (edit) await ctx.editMessageText(text, { reply_markup: markup }).catch(() => {});
     else await ctx.reply(text, { reply_markup: markup });
     return;
@@ -66,7 +68,7 @@ async function renderTop(ctx: MyContext, page: number, edit: boolean) {
   if (pages > 1) nav.push(ibtn(`${page + 1}/${pages}`, "noop:ref"));
   if (page < pages - 1) nav.push(ibtn("➡️", `ref:page:${page + 1}`));
   if (nav.length) rows.push(nav);
-  rows.push([ibtn("Menyuga qaytish", "ref:close", undefined, BE.backMenu)]);
+  rows.push([homeBtn("ref:close")]);
 
   const reward = await getReferralReward();
   const rewardLine =
@@ -74,12 +76,7 @@ async function renderTop(ctx: MyContext, page: number, edit: boolean) {
       ? `🎁 Mukofot: har <b>${reward.count}</b> ta referal = <b>${reward.days} kun</b> premium`
       : `🎁 Mukofot: <b>o'chirilgan</b>`;
 
-  rows.splice(
-    rows.length - 1,
-    0,
-    [ibtn("🎁 Mukofotni sozlash", "ref:reward", "success")],
-    [ibtn("🖼 Taklif rasmi haqida", "ref:photo", "primary")]
-  );
+  rows.splice(rows.length - 1, 0, [ibtn("🎁 Mukofotni sozlash", "ref:reward", "success")]);
 
   const text =
     `<tg-emoji emoji-id="${BE.users}">👥</tg-emoji> <b>Referal bo'lim</b>\n\n` +
@@ -112,26 +109,9 @@ referralsHandler.callbackQuery("ref:reward", async (ctx) => {
   );
 });
 
-// ─── Taklif rasmi haqida ma'lumot ────────────────────────────────────────────
-// Rasm alohida yuklanmaydi: Telegram matn yonida kichik rasm ko'rsatishi uchun
-// u OCHIQ havolada turishi shart. Bot havolasining o'zi shunday havola —
-// Telegram uning uchun preview yasaganda bot AVATARINI ko'rsatadi. Shuning
-// uchun "taklif rasmi" = bot avatari, uni @BotFather orqali almashtiriladi.
-referralsHandler.callbackQuery("ref:photo", async (ctx) => {
-  await ctx.answerCallbackQuery();
-  await ctx.reply(
-    `🖼 <b>Taklif rasmi</b>\n\n` +
-      `Foydalanuvchi referal havolasini do'stlariga ulashganda, matn yonida ` +
-      `<b>botning avatari</b> kichik rasm bo'lib ko'rinadi.\n\n` +
-      `Rasmni almashtirish uchun:\n` +
-      `1. @BotFather ga kiring\n` +
-      `2. <code>/setuserpic</code> buyrug'ini yuboring\n` +
-      `3. <b>@${ctx.me.username}</b> botini tanlang\n` +
-      `4. Yangi rasmni yuboring\n\n` +
-      `<i>Tavsiya: kvadrat rasm (masalan 640×640), yozuv yirik va o'qilarli bo'lsin — ` +
-      `u kichik ko'rinadi.</i>`
-  );
-});
+// "Taklif rasmi haqida" tugmasi OLIB TASHLANDI (2026-08-14) — u faqat
+// @BotFather'da avatarni almashtirish yo'riqnomasini ko'rsatardi, ya'ni bot
+// sozlamasi emas, bir martalik ma'lumot edi va panelda joy egallardi.
 
 referralsHandler.callbackQuery("ref:reward:cancel", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bekor qilindi." });
@@ -175,7 +155,7 @@ referralsHandler.callbackQuery(/^ref:view:(\d+)$/, async (ctx) => {
       {
         reply_markup: kb(
           [ibtn("✉️ Xabar yuborish", `ref:msg:${refId}`, "success", BE.broadcast)],
-          [ibtn("Orqaga", "ref:page:0", undefined, BE.backMenu)]
+          [backBtn("ref:page:0")]
         ),
       }
     )

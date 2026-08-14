@@ -559,9 +559,11 @@ function buildListKeyboard(items: AiListItem[], page: number) {
   const totalPages = Math.ceil(items.length / PAGE_SIZE);
   if (totalPages > 1) {
     const nav: ReturnType<typeof ibtn>[] = [];
-    if (page > 0) nav.push(ibtn("Orqaga", `ai:pg:${page - 1}`, "primary"));
+    // SAHIFALASH — navigatsiya EMAS. Ilgari "Orqaga" deb nomlangan edi va
+    // "◀️ Orqaga" (oldingi ekranga qaytish) bilan chalkashardi.
+    if (page > 0) nav.push(ibtn("⬅️ Oldingi", `ai:pg:${page - 1}`, "primary"));
     nav.push(ibtn(`${page + 1}/${totalPages}`, "noop:ai"));
-    if (page < totalPages - 1) nav.push(ibtn("Oldinga ➡️", `ai:pg:${page + 1}`, "success"));
+    if (page < totalPages - 1) nav.push(ibtn("Keyingi ➡️", `ai:pg:${page + 1}`, "success"));
     rows.push(nav);
   }
   rows.push([ibtn("❌ Yopish", "ai:close", "danger")]);

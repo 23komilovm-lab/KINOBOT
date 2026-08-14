@@ -2,7 +2,7 @@ import { Composer } from "grammy";
 import { prisma } from "../prisma.js";
 import { config } from "../config.js";
 import { e } from "../utils/emoji.js";
-import { contactAdminBtn, contactAdminKb, ibtn, kb, BE } from "../utils/keyboard.js";
+import { backBtn, contactAdminBtn, contactAdminKb, ibtn, kb } from "../utils/keyboard.js";
 import { getSetting, KEYS } from "../utils/settings.js";
 import {
   activeTariffs,
@@ -93,7 +93,7 @@ export async function sendPremiumPrompt(
       : `${t.label} — ${priceStr} so'm`;
     return [ibtn(btnLabel, `prem:buy:${t.id}`, isBest ? "success" : "primary")];
   });
-  rows.push([ibtn("Orqaga", "prem:back", undefined, BE.backMenu)]);
+  rows.push([backBtn("prem:back")]);
 
   const text = lines.join("\n");
   const markup = kb(...rows);
@@ -170,7 +170,7 @@ premiumHandler.callbackQuery(/^prem:buy:(\d+)$/, async (ctx) => {
       ibtn(`⭐ Stars orqali (${tariff.starsPrice} ⭐)`, `pm:stars:${tariff.id}`, "success"),
     ]);
   }
-  rows.push([ibtn("Orqaga", "prem:show", undefined, BE.backMenu)]);
+  rows.push([backBtn("prem:show")]);
 
   await ctx
     .editMessageText(
