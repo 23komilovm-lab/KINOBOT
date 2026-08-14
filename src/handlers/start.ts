@@ -6,6 +6,7 @@ import {
   getUnsubscribedChannels,
   recordSubscriptionJoin,
   attributePendingSubscriptions,
+  editSubscriptionPrompt,
 } from "../utils/subscription.js";
 import { attachReferrer } from "../utils/referral.js";
 import { sendReferralInfo } from "./referral.js";
@@ -170,10 +171,21 @@ startHandler.callbackQuery("sub:check", async (ctx) => {
       "✅ A'zolik tasdiqlandi! Endi kino kodini yuboring yoki nomini yozib qidiring."
     );
   } else {
+    // Obuna TO'LIQ emas. Ikki ish qilinadi:
+    //
+    // 1. Ro'yxat YANGILANADI — allaqachon a'zo bo'lingan kanallar tugmalar
+    //    orasidan yo'qoladi va faqat qolganlari ko'rinadi. Ilgari ro'yxat
+    //    o'zgarmasdi va foydalanuvchi qaysi kanal qolganini bilmasdi.
+    //    `notJoined` ishlatiladi (`blocking` emas): Instagram/havola turlari
+    //    tekshirib bo'lmaydigan bo'lsa ham ro'yxatda turishi kerak.
+    //
+    // 2. Popup SONNI aytmaydi — ro'yxatning o'zi ko'rsatib turibdi, raqam esa
+    //    faqat qo'shimcha shovqin edi.
     await ctx.answerCallbackQuery({
-      text: `❌ ${blocking.length} ta kanalga hali a'zo bo'lmadingiz!`,
+      text: "❌ Obuna to'liq emas — qolgan kanallarga a'zo bo'ling.",
       show_alert: true,
     });
+    await editSubscriptionPrompt(ctx, notJoined);
   }
 });
 

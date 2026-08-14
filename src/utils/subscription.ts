@@ -240,9 +240,23 @@ export function rememberBlockingChannels(ctx: MyContext, channels: Channel[]): v
     .filter((c) => c.type !== "INSTAGRAM" && c.type !== "REQUEST")
     .map((c) => c.chatId.toString());
   if (ids.length === 0) return;
+
+  // RO'YXAT QISQARMAYDI. "Tekshirish" bosilganda darvoza qayta chiziladi va
+  // unga faqat QOLGAN kanallar tushadi. Agar shu yerda ro'yxat almashtirilsa,
+  // allaqachon qo'shilgan kanallar atributsiya ro'yxatidan tushib qolardi va
+  // `attributePendingSubscriptions` ularni "bot" deb belgilamasdi.
+  //
+  // Shuning uchun sessiyadagi ro'yxat HALI YANGI bo'lsa — birlashtiriladi.
+  // Eskirgan bo'lsa almashtiriladi: o'sha kanallar allaqachon atributsiya
+  // oynasidan chiqib ketgan va ularni tiriltirish soxta "bot" yozuvi bo'lardi.
+  const prev = ctx.session.scratch?.pendingSubChannels as string[] | undefined;
+  const prevAt = ctx.session.scratch?.pendingSubAt as number | undefined;
+  const prevFresh =
+    Array.isArray(prev) && typeof prevAt === "number" && Date.now() - prevAt <= ATTRIB_WINDOW_MS;
+
   ctx.session.scratch = {
     ...(ctx.session.scratch ?? {}),
-    pendingSubChannels: ids,
+    pendingSubChannels: prevFresh ? [...new Set([...prev, ...ids])] : ids,
     // Yangilik shtampi: faqat oxirgi 30 daqiqada ko'rsatilgan darvoza atributsiya
     // qiladi. Eskirib qolgan sessiya (foydalanuvchi darvozani korib, organik
     // qo'shilgan) soxta "bot" yozuvini yaratmasin.
