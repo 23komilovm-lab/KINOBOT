@@ -171,38 +171,54 @@ export async function checkChannelHealth(
     return finish();
   }
 
-  // Havola tirikmi. `editChatInviteLink` faqat BOT yaratgan va TIRIK havolani
-  // tahrirlaydi — bekor qilingan havolada xato qaytaradi, ya'ni bu ishonchli
-  // tiriklik probasi.
-  //
-  // DIQQAT: `creates_join_request` ni UZATISH SHART. Telegram ko'rsatilmagan
-  // ixtiyoriy maydonlarni standart qiymatga qaytaradi — so'rovli kanalda uni
-  // tushirib qoldirish havolani "tasdiqlashsiz" qilib qo'yadi va odamlar
-  // navbatsiz kirib ketadi.
+  // HAVOLA HOLATI. Bu chaqiruv bir vaqtning o'zida tekshiradi VA tuzatadi:
+  // `creates_join_request` bilan so'rovli kanal rejimini saqlaydi, `member_limit`
+  // bilan esa tashqaridan qo'yilgan limitni tozalaydi (u bo'lmasa Telegram
+  // limitni saqlangan past qiymatga QAYTARADI va havola avtomatik bekor
+  // qilinadi — 14.08.2026 da aynan shu tekshiruvning o'zi limitni tiklab,
+  // tuzatishni bekor qilgan edi).
   if (!ch.botInviteLink) return finish();
 
-  const alive = await tryTwice(
+  const link = await tryTwice(
     () =>
       api.editChatInviteLink(chatId, ch.botInviteLink!, {
         name: "bot_tracking",
         creates_join_request: ch.type === "REQUEST",
+        // Limitni HAR SAFAR tozalab turamiz — pastdagi izohga qarang.
+        // So'rovli kanalda `member_limit` va `creates_join_request` o'zaro
+        // istisno, shuning uchun u yerda uzatilmaydi.
+        ...(ch.type === "REQUEST" ? {} : { member_limit: UNLIMITED_MEMBER_LIMIT }),
       }),
     opts.retryDelayMs
   );
-  if (!alive) {
+
+  // Chaqiruvning O'ZI yiqilsa — havola bu botniki emas yoki chat yo'q.
+  if (!link) {
     problems.push("link_dead");
     return finish();
   }
 
-  // JIM O'LADIGAN HAVOLA. `editChatInviteLink` muvaffaqiyatli — havola tirik,
-  // lekin unda a'zo limiti yoki muddat bo'lsa u TO'LGACH o'ladi va darvoza
-  // hech qanday xatosiz buziladi. Bot bunday limitni hech qachon qo'ymaydi
-  // (`createChatInviteLink` chaqiruvlarida `member_limit` yo'q) — demak uni
-  // Telegram ilovasida qo'lda qo'yishgan.
+  // ⚠️ ENG MUHIM TEKSHIRUV. `editChatInviteLink` BEKOR QILINGAN havolada ham
+  // `ok: true` qaytaradi — 14.08.2026 da prodda tekshirilgan. Ya'ni "chaqiruv
+  // yiqilmadi = havola tirik" degan xulosa YOLG'ON edi: o'sha kuni beshtala
+  // havola bekor qilingan bo'lsa ham tekshiruv hammasini "sog'lom" deb
+  // ko'rsatgan va majburiy obuna jimgina buzilgan.
   //
-  // 14.08.2026 prodda aynan shu bo'ldi: BARCHA 5 kanal havolasida limit bor edi
-  // (9, 6, 3, 4, 9) va majburiy obuna jimgina ishlamay qolgandi.
-  if (isLimited(alive.member_limit, alive.expire_date)) problems.push("link_limited");
+  // Bekor qilingan havolani TIKLAB BO'LMAYDI — yangisi kerak.
+  if (link.is_revoked) {
+    problems.push("link_dead");
+    return finish();
+  }
+
+  // Havolada a'zo limiti bo'lsa Telegram uni limit to'lgach AVTOMATIK bekor
+  // qiladi — darvoza hech qanday xatosiz buziladi. Bot limitni hech qachon
+  // qo'ymaydi (kodda `member_limit` faqat shu yerda, tozalash uchun), demak
+  // uni tashqaridan qo'yishgan: 14.08.2026 da beshtala kanalda limit bor edi
+  // (9, 6, 3, 4, 9) va u vaqt o'tishi bilan qayta qo'yilib turardi.
+  //
+  // Yuqoridagi chaqiruv limitni tozalaydi, shuning uchun bu yerga tushish —
+  // tozalash ishlamagani (yoki muddat qo'yilgani) degani.
+  if (isLimited(link.member_limit, link.expire_date)) problems.push("link_limited");
   return finish();
 }
 

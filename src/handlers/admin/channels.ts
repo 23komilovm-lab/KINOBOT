@@ -2,6 +2,7 @@ import { Composer, Keyboard } from "grammy";
 import type { ChatAdministratorRights } from "grammy/types";
 import { adminCan, getChannelLimit } from "../../config.js";
 import { prisma } from "../../prisma.js";
+import { log } from "../../utils/logger.js";
 import { ce, e } from "../../utils/emoji.js";
 import {
   ADMIN_MENU_BUTTONS,
@@ -32,6 +33,7 @@ import {
 import { rebuildMemberSnapshot } from "../../utils/channelEvents.js";
 import {
   PROBLEM_LABEL,
+  UNLIMITED_MEMBER_LIMIT,
   checkChannelHealth,
   getCachedHealth,
 } from "../../services/channelHealth.js";
@@ -73,16 +75,42 @@ interface PendingChannel {
 }
 
 /**
- * Bot tracking havolasini yaratadi yoki mavjudini qaytaradi.
- * Har kanal uchun faqat bitta "bot_tracking" nomli havola yaratiladi.
+ * Bot tracking havolasini qaytaradi: mavjudi TIRIK bo'lsa o'shani, aks holda
+ * yangisini yaratadi. Har kanal uchun bitta "bot_tracking" havolasi.
+ *
+ * ⚠️ TIRIKLIK TEKSHIRUVI SHART. Ilgari DB'dagi havola shundoq qaytarilardi —
+ * kanal o'chirilib qayta qo'shilganda yoki eski ma'lumot tiklanganda bot
+ * BEKOR QILINGAN havolani darvozaga qo'yib yuborardi va majburiy obuna
+ * jimgina ishlamay qolardi (14.08.2026 da prodda beshtala kanal shu holatda
+ * edi). Bekor qilingan havolani tiklab bo'lmaydi — yangisi kerak.
  */
 async function getOrCreateBotInviteLink(ctx: MyContext, chatId: bigint): Promise<string | null> {
-  // Avval DB dan tekshiramiz
   const ch = await prisma.channel.findUnique({
     where: { chatId },
     select: { botInviteLink: true, type: true },
   });
-  if (ch?.botInviteLink) return ch.botInviteLink;
+
+  if (ch?.botInviteLink) {
+    // `editChatInviteLink` bekor qilingan havolada ham `ok` qaytaradi,
+    // shuning uchun javobdagi `is_revoked` tekshiriladi (channelHealth.ts
+    // dagi bilan bir xil mantiq).
+    const probe = await ctx.api
+      .editChatInviteLink(Number(chatId), ch.botInviteLink, {
+        name: "bot_tracking",
+        creates_join_request: ch.type === "REQUEST",
+        ...(ch.type === "REQUEST" ? {} : { member_limit: UNLIMITED_MEMBER_LIMIT }),
+      })
+      .catch(() => null);
+
+    if (probe && !probe.is_revoked) return ch.botInviteLink;
+
+    // O'lik havola — registrda "bekor qilingan" deb belgilanadi (statistikasi
+    // saqlanadi) va pastda yangisi yaratiladi.
+    await markInviteLinkRevoked(ch.botInviteLink);
+    log("warn", "Eski tracking havolasi o'lik — yangisi yaratiladi", {
+      chatId: chatId.toString(),
+    });
+  }
 
   // Yangi "bot_tracking" havolasi yaratamiz
   try {

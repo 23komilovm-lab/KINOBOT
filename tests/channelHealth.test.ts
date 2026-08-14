@@ -133,6 +133,41 @@ describe("checkChannelHealth", () => {
     expect(h.problems).toEqual([]);
   });
 
+  // ---- BEKOR QILINGAN HAVOLA (eng muhim regressiya) ----
+  it("REGRESSIYA: bekor qilingan havola — `ok` javob bo'lsa ham link_dead", async () => {
+    // `editChatInviteLink` BEKOR QILINGAN havolada ham ok qaytaradi. 14.08.2026
+    // da prodda beshtala havola bekor qilingan edi, tekshiruv esa hammasini
+    // "sog'lom" deb ko'rsatgan va majburiy obuna jimgina buzilgan.
+    const a = api({
+      editChatInviteLink: vi
+        .fn()
+        .mockResolvedValue({ invite_link: "https://t.me/+tracking", is_revoked: true }),
+    });
+    const h = await checkChannelHealth(a, chan(), BOT_ID, { act: true, retryDelayMs: 0 });
+    expect(h.problems).toEqual(["link_dead"]);
+    // Bu darvozani buzadi — kanal chiqarilishi shart
+    expect(h.disabled).toBe(true);
+  });
+
+  it("REGRESSIYA: proba `member_limit` ni tozalab yuboradi", async () => {
+    // `member_limit` uzatilmasa Telegram uni saqlangan past qiymatga qaytaradi
+    // va havola to'lgach avtomatik bekor qilinadi. Ilgari shu tekshiruvning
+    // o'zi qo'lda qilingan tozalashni har 30 daqiqada bekor qilardi.
+    const a = api();
+    await checkChannelHealth(a, chan({ type: "PUBLIC" }), BOT_ID, { retryDelayMs: 0 });
+    expect(a.editChatInviteLink.mock.calls[0][2]).toMatchObject({
+      member_limit: UNLIMITED_MEMBER_LIMIT,
+    });
+  });
+
+  it("so'rovli kanalda `member_limit` UZATILMAYDI — u jr bilan o'zaro istisno", async () => {
+    const a = api();
+    await checkChannelHealth(a, chan({ type: "REQUEST" }), BOT_ID, { retryDelayMs: 0 });
+    const opts = a.editChatInviteLink.mock.calls[0][2];
+    expect(opts.creates_join_request).toBe(true);
+    expect(opts).not.toHaveProperty("member_limit");
+  });
+
   // ---- JIM O'LADIGAN HAVOLA ----
   // `editChatInviteLink` muvaffaqiyatli bo'lsa ham, havolada a'zo limiti yoki
   // muddat bo'lsa u to'lgach o'ladi va darvoza xatosiz buziladi. Prodda
