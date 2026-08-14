@@ -518,6 +518,21 @@ describe("buildChannelStatsPanel", () => {
     expect(panel).not.toContain("<a href=");
   });
 
+  it("admin ulagan havola panelda alohida ko'rsatiladi", () => {
+    const panel = buildChannelStatsPanel(
+      chan({ adminInviteLink: "https://t.me/+admin", botInviteLink: "https://t.me/+bot" }),
+      stats()
+    );
+    expect(panel).toContain("📎 Darvoza havolasi (sizniki): <code>https://t.me/+admin</code>");
+    // Tracking havolasi ham qoladi — u statistika uchun ishlaydi
+    expect(panel).toContain("🔗 Tracking havolasi: <code>https://t.me/+bot</code>");
+  });
+
+  it("admin havolasi yo'q bo'lsa o'sha qator chiqmaydi", () => {
+    const panel = buildChannelStatsPanel(chan({ botInviteLink: "https://t.me/+bot" }), stats());
+    expect(panel).not.toContain("Darvoza havolasi");
+  });
+
   it("sarlavha HTML'dan xavfsiz (escape qilinadi)", () => {
     const panel = buildChannelStatsPanel(chan({ title: 'A & B <b>x</b> "q"' }), stats());
     expect(panel).not.toContain("A & B <b>");

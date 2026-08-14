@@ -170,8 +170,10 @@ async function buildSubscriptionMarkup(channels: Channel[]): Promise<InlineKeybo
     // To'g'ridan-to'g'ri URL tugma. Callback + answerCallbackQuery(url=...) ISHLAMAYDI:
     // Telegram u parametrda faqat o'yin havolasi yoki t.me/<bot>?start=... qabul qiladi,
     // kanal havolasi `URL_INVALID` beradi (2026-08-09 da prodda aynan shu yuz berdi).
-    // Atributsiya baribir ishlaydi — channelUrl() birinchi navbatda botInviteLink ni
-    // qaytaradi, kimligi chat_member yangilanishida invite_link orqali bilinadi.
+    // Atributsiya `chat_member` yangilanishidagi `invite_link` orqali biliniladi.
+    // DIQQAT: egasi o'z havolasini ulagan bo'lsa (`adminInviteLink`) u ustun
+    // turadi va uni bot yaratmagani uchun qo'shilish "🔗 Havola" deb sanaladi,
+    // "🤖 Bot orqali" emas — bu ataylab qilingan kelishuv (channelUrl izohi).
     kb.url(label, url).row();
   }
 
@@ -250,9 +252,22 @@ export async function editSubscriptionPrompt(ctx: MyContext, channels: Channel[]
   });
 }
 
+/**
+ * Darvoza tugmasi qaysi havolani beradi. Tartib MUHIM:
+ *
+ *  1. `adminInviteLink` — egasi "📎 Havolani ulash" orqali O'ZI ulagan havola.
+ *     Eng ustun: u egasining nazoratida, Telegram'ning o'z statistikasida
+ *     ko'rinadi va bot uni hech qachon almashtirmaydi.
+ *     Narxi: Telegram boshqa admin yaratgan havola satrini niqoblaydi va
+ *     `creator` bot bo'lmaydi, shuning uchun qo'shilishlar statistikada
+ *     "🔗 Havola" deb sanaladi, "🤖 Bot orqali" emas.
+ *  2. `botInviteLink` — bot tracking havolasi, to'liq atributsiya beradi.
+ *  3. `@username` — hech qachon eskirmaydi, lekin atributsiyasi yo'q.
+ *  4. `inviteLink` — bot yaratgan zaxira havola (PRIVATE/REQUEST kanallarda).
+ */
 export function channelUrl(ch: Channel): string | null {
   if (ch.type === "INSTAGRAM") return ch.inviteLink ?? null;
-  // Bot tracking havolasi avval (statistika uchun), keyin username, keyin inviteLink
+  if (ch.adminInviteLink) return ch.adminInviteLink;
   if (ch.botInviteLink) return ch.botInviteLink;
   if (ch.username) return `https://t.me/${ch.username.replace(/^@/, "")}`;
   if (ch.inviteLink) return ch.inviteLink;
@@ -281,10 +296,7 @@ export async function ensureSubscribed(ctx: MyContext, userId: number): Promise<
  * belgilaydi va ro'yxatni tozalaydi. Bir necha marta chaqirilishi xavfsiz —
  * `recordSubscriptionJoin` mavjud yozuvni yangilaydi, yangisini yaratmaydi.
  */
-export async function attributePendingSubscriptions(
-  ctx: MyContext,
-  userId: number
-): Promise<void> {
+export async function attributePendingSubscriptions(ctx: MyContext, userId: number): Promise<void> {
   const v = ctx.session?.scratch;
   const pending = v?.pendingSubChannels as string[] | undefined;
   if (!Array.isArray(pending) || pending.length === 0) return;

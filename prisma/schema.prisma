@@ -200,6 +200,15 @@ model Channel {
   username    String?
   inviteLink  String?     // PRIVATE/REQUEST uchun havola; INSTAGRAM uchun profil URL
   botInviteLink String?   // Bot tracking havolasi (createChatInviteLink name="bot_tracking")
+  // Admin O'ZI yaratgan havola ("📎 Havolani ulash" orqali). Darvoza tugmasi
+  // ENG BIRINCHI shuni beradi — egasi havolani o'z nazoratida ushlab, qo'shilish
+  // sonini Telegram'ning o'z statistikasida ko'rishi uchun.
+  //
+  // `inviteLink` dan ALOHIDA saqlanadi: u yerda bot yaratgan zaxira havolalar
+  // ham turadi (PRIVATE/REQUEST kanallarda), ikkalasini aralashtirsak boshqa
+  // kanallarning atributsiyasi buzilardi. Kanal qayta qo'shilganda ham
+  // `finishAddChannel` bu maydonga tegmaydi — havola yo'qolmaydi.
+  adminInviteLink String?
   type        ChannelType @default(PUBLIC)
   isActive    Boolean     @default(true)
   sortOrder   Int         @default(0)

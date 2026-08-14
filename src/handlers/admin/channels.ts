@@ -378,11 +378,20 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
     return `${header}\n\n<b>📊 Statistikalar:</b> —`;
   }
 
+  // Darvoza QAYSI havolani berayotgani ko'rinib tursin — admin o'z havolasini
+  // ulagan bo'lsa u ustun turadi (`channelUrl` tartibi) va bot havolasi
+  // statistika uchun ishlaydi. Ikkalasi bo'lsa ikkalasi ham ko'rsatiladi.
+  const adminLinkLine = c.adminInviteLink
+    ? `\n📎 Darvoza havolasi (sizniki): <code>${e.escapeHtml(c.adminInviteLink)}</code>`
+    : "";
+
   // Tracking havolasi bo'lmasa statistika faqat darvoza sessiyasiga tayanadi —
   // buni admin bilib tursin (odatda botda "havola orqali taklif" huquqi yo'q).
-  const linkLine = c.botInviteLink
-    ? `\n🔗 Tracking havolasi: <code>${e.escapeHtml(c.botInviteLink)}</code>`
-    : `\n⚠️ Tracking havolasi yo'q — "♻️ Yangi havola" tugmasini bosing.`;
+  const linkLine =
+    adminLinkLine +
+    (c.botInviteLink
+      ? `\n🔗 Tracking havolasi: <code>${e.escapeHtml(c.botInviteLink)}</code>`
+      : `\n⚠️ Tracking havolasi yo'q — "♻️ Yangi havola" tugmasini bosing.`);
 
   // Havola kesimi qisqacha: havola bir necha marta yangilangan bo'lsa, admin
   // shu yerdan bilib, to'liq taqsimotni "🔗 Havolalar" ekranida ko'radi.
@@ -1110,22 +1119,26 @@ channelsHandler.on("message", async (ctx, next) => {
       return;
     }
 
-    // ADMIN yaratgan havola. Uni ham qabul qilamiz — darvoza tugmasi shuni
-    // beradi. Atributsiya cheklangan: Telegram bunday havola satrini niqoblaydi
-    // va `creator.id` bot emas, shuning uchun qo'shilishlar "🔗 Havola"
-    // bucket'iga tushadi. Havola hisobini egasi Telegram'ning o'zida ko'radi.
-    await prisma.channel.update({ where: { id: setLinkId }, data: { inviteLink: msgText } });
+    // ADMIN yaratgan havola — alohida `adminInviteLink` ustuniga. Darvoza
+    // tugmasi ENG BIRINCHI shuni beradi (`channelUrl` tartibi), ya'ni havola
+    // egasining nazoratida qoladi va bot uni almashtirmaydi.
+    //
+    // `inviteLink` ga YOZILMAYDI: u yerda bot yaratgan zaxira havolalar turadi
+    // va kanal qayta qo'shilganda `finishAddChannel` uni qayta yozadi.
+    await prisma.channel.update({
+      where: { id: setLinkId },
+      data: { adminInviteLink: msgText },
+    });
     await registerInviteLink(ch.chatId, msgText, "majburiy_obuna");
     ctx.session.scratch = {};
     await ctx.reply(
-      `${ce("check")} <b>O'z havolangiz</b> ulandi:\n<code>${e.escapeHtml(msgText)}</code>\n\n` +
-        `ℹ️ Bu havolani bot yaratmagan, shuning uchun u orqali kelganlar ` +
-        `statistikada «🔗 Havola» deb sanaladi — «🤖 Bot orqali» emas. ` +
-        `Aniq hisobni Telegram'ning o'zida (Kanal → Taklif havolalari) ko'rasiz.` +
-        (ch.botInviteLink
-          ? `\n\n⚠️ Kanalda bot havolasi ham bor va darvoza tugmasi <b>o'shani</b> beradi. ` +
-            `Sizning havolangiz faqat bot havolasi bo'lmaganda ishlatiladi.`
-          : "")
+      `${ce("check")} <b>O'z havolangiz ulandi</b> — darvoza endi shuni beradi:\n` +
+        `<code>${e.escapeHtml(msgText)}</code>\n\n` +
+        `ℹ️ Bu havolani bot yaratmagan, shuning uchun u orqali kelganlar bot ` +
+        `statistikasida «🔗 Havola» deb sanaladi — «🤖 Bot orqali» emas. ` +
+        `Aniq hisobni Telegram'ning o'zida ko'rasiz: kanal → Taklif havolalari.\n\n` +
+        `⚠️ Havolaga <b>a'zo limiti qo'ymang</b> — limit to'lgach Telegram uni ` +
+        `bekor qiladi va majburiy obuna ishlamay qoladi.`
     );
     return;
   }
