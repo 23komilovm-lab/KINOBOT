@@ -1400,16 +1400,30 @@ async function finishAddChannel(
 }
 
 // ============ O'CHIRISH ============
-channelsHandler.callbackQuery("ch:del", async (ctx) => {
+
+/**
+ * O'chirish ro'yxatini chizadi. Kanal qolmagan bo'lsa `false` qaytaradi.
+ *
+ * Callback javobini ATAYLAB bermaydi — chaqiruvchi beradi. `ch:delconf`
+ * allaqachon `answerCallbackQuery` chaqirgan bo'ladi, ikkinchi marta chaqirish
+ * Telegram xatosi.
+ */
+async function renderDeleteList(ctx: MyContext): Promise<boolean> {
   const channels = await prisma.channel.findMany({ orderBy: { sortOrder: "asc" } });
-  if (channels.length === 0) {
-    await ctx.answerCallbackQuery({ text: "O'chirish uchun kanal yo'q.", show_alert: true });
-    return;
-  }
-  await ctx.answerCallbackQuery();
+  if (channels.length === 0) return false;
   const rows = channels.map((c) => [ibtn(c.title, `ch:delconf:${c.id}`, "danger", BE.chDelete)]);
   rows.push([ibtn("Orqaga", "ch:menu", undefined, BE.backMenu)]);
-  await ctx.editMessageText(`<b>Qaysi kanalni o'chirasiz?</b>`, { reply_markup: kb(...rows) });
+  await ctx
+    .editMessageText(`<b>Qaysi kanalni o'chirasiz?</b>`, { reply_markup: kb(...rows) })
+    .catch(() => {});
+  return true;
+}
+
+channelsHandler.callbackQuery("ch:del", async (ctx) => {
+  const shown = await renderDeleteList(ctx);
+  await ctx.answerCallbackQuery(
+    shown ? undefined : { text: "O'chirish uchun kanal yo'q.", show_alert: true }
+  );
 });
 
 channelsHandler.callbackQuery(/^ch:delconf:(\d+)$/, async (ctx) => {
@@ -1438,7 +1452,11 @@ channelsHandler.callbackQuery(/^ch:delconf:(\d+)$/, async (ctx) => {
       text: "✅ O'chirildi.\n\nStatistika tarixi saqlanadi — bu kanalni qayta qo'shsangiz raqamlar tiklanadi.",
       show_alert: true,
     });
-    await renderChannelList(ctx);
+    // O'CHIRISH OQIMIDA QOLAMIZ: ketma-ket bir necha kanal o'chirish odatiy
+    // holat. Ilgari "Kanallar ro'yxati" (statistika) ekraniga o'tib ketardi va
+    // davom ettirish uchun har safar menyudan qaytadan kirish kerak bo'lardi.
+    // Oxirgi kanal o'chirilsa ro'yxat bo'shaydi — menyuga qaytamiz.
+    if (!(await renderDeleteList(ctx))) await refreshMenu(ctx);
   } catch (err) {
     await ctx.answerCallbackQuery({
       text: `❌ O'chirib bo'lmadi: ${(err as Error).message}`,
