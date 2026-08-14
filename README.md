@@ -167,9 +167,22 @@ tekshiradi:
 | Bot admin va huquqlari joyidami | `getChatMember(bot)` → `can_invite_users` |
 | Tracking havolasi tirikmi | `editChatInviteLink` (faqat bot yaratgan va tirik havolani tahrirlaydi) |
 
-Holat **o'zgarganda** egaga Telegram orqali xabar boradi (oxirgi holat `Setting`
-jadvalida — redeploy takroriy ogohlantirish yubormaydi). O'lik havola
-**avtomatik almashtiriladi**, eskisi registrda `revokedAt` bilan qoladi.
+**Reaksiya: bot kanalga hech narsa YOZMAYDI.** Darvozani buzadigan muammo
+topilsa (`no_access`, `not_admin`, `link_dead`) o'sha kanalning majburiy
+obunasi **vaqtincha o'chiriladi** — shunda bot qolgan kanallar bilan ishlashda
+davom etadi va foydalanuvchilar bloklanib qolmaydi. Egaga xabar boradi. Muammo
+tuzalganda majburiy obuna **avtomatik qayta yoqiladi**, lekin faqat o'chirishni
+sog'liq tekshiruvi qilgan bo'lsa (`chhealth:off:<chatId>` belgisi) — egasi
+qo'lda o'chirgan kanal tiklanmaydi.
+
+`no_invite_right` kanalni o'chirmaydi: bot havola yarata olmasa ham a'zolikni
+tekshira oladi, ya'ni mavjud havola bilan darvoza ishlayveradi.
+
+Har bir Telegram so'rovi **bir marta qayta uriniladi** (3 s oraliq bilan) —
+prodda uchraydigan 502/ECONNRESET tufayli kanal bekorga o'chirilmasin.
+
+Holat **o'zgarganda** egaga xabar boradi (oxirgi holat `Setting` jadvalida —
+redeploy takroriy ogohlantirish yubormaydi).
 
 ⚠️ Tiriklik probasida `creates_join_request` uzatilishi **shart** — Telegram
 ko'rsatilmagan ixtiyoriy maydonlarni standart qiymatga qaytaradi, ya'ni uni
@@ -192,6 +205,30 @@ qayta quriladi (idempotent: jonli yozuvlar ustidan yozilmaydi).
 
 O'chirish tugmasi **faqat** `Kanal boshqaruvi → O'chirish` menyusida. Kanal
 statistikasi sahifasida u ataylab yo'q — tasodifan bosilmasin.
+
+### Havola almashtirish — xavfsizlik qoidalari
+
+`♻️ Yangi havola` eski havolani Telegram'da **o'ldiradi**, ya'ni uni saqlab
+qo'ygan yoki reklamaga joylagan odamlar «havola yaroqsiz» xabarini oladi.
+Shuning uchun:
+
+- Tugma `🔗 Havolalar` (statistika) ekranida **yo'q** — ko'rish oqimida
+  `🔄 Yangilash` yonida turgan buzuvchi tugma tasodifan bosiladi.
+- Qolgan tugma **tasdiq oynasidan** o'tadi (`ch:newlinkask`).
+- Bot hech qachon o'zi havola almashtirmaydi (sog'liq tekshiruvi ham).
+
+### O'z havolangizni ulash
+
+`📎 Havolani ulash` ikkala xil havolani qabul qiladi va turini o'zi aniqlaydi
+(`editChatInviteLink` faqat bot yaratgan havolani tahrirlaydi):
+
+| Havola | Qayerga yoziladi | Atributsiya |
+| --- | --- | --- |
+| Bot yaratgan | `botInviteLink` | «🤖 Bot orqali» — to'liq |
+| Admin yaratgan | `inviteLink` | «🔗 Havola» — Telegram satrni niqoblaydi, hisobni Telegram'ning o'zida ko'rasiz |
+
+Darvoza tugmasi `botInviteLink` ni ustun ko'radi; admin havolasi u bo'lmaganda
+ishlatiladi.
 
 Atributsiya `channel_events.inviteLink` / `join_requests.inviteLink` ustunlariga
 tayanadi — Telegram `chat_member` va `chat_join_request` yangilanishlarida bergan

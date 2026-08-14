@@ -384,25 +384,26 @@ describe("buildChannelStatsPanel", () => {
     // Bot admin bo'lmasa raqamlar ahamiyatsiz: avval shuni ko'rish kerak.
     const panel = buildChannelStatsPanel(
       chan({}),
-      stats({ botTotal: 500, health: { problems: ["bot admin emas"], healed: false } })
+      stats({ botTotal: 500, health: { problems: ["bot admin emas"], disabled: false } })
     );
     expect(panel).toContain("🚨 <b>NOSOZLIK:</b>");
     expect(panel).toContain("• bot admin emas");
     expect(panel.indexOf("NOSOZLIK")).toBeLessThan(panel.indexOf("Bot orqali qo'shilgan"));
   });
 
-  it("avtomatik tuzatilgan bo'lsa shu ham aytiladi", () => {
+  it("majburiy obuna o'chirilgan bo'lsa shu ham aytiladi", () => {
     const panel = buildChannelStatsPanel(
       chan({}),
-      stats({ health: { problems: ["havola o'lik"], healed: true } })
+      stats({ health: { problems: ["havola o'lik"], disabled: true } })
     );
-    expect(panel).toContain("✅ Havola avtomatik almashtirildi.");
+    expect(panel).toContain("Majburiy obuna vaqtincha o'chirildi");
+    expect(panel).toContain("o'zi qayta yoqiladi");
   });
 
   it("muammo yo'q bo'lsa blok umuman chiqmaydi", () => {
     const panel = buildChannelStatsPanel(
       chan({}),
-      stats({ health: { problems: [], healed: false } })
+      stats({ health: { problems: [], disabled: false } })
     );
     expect(panel).not.toContain("NOSOZLIK");
   });
@@ -418,7 +419,7 @@ describe("buildChannelStatsPanel", () => {
       chan({ type: "REQUEST" }),
       stats({
         req: { today: 0, week: 0, month: 0, total: 0, approved: 0 },
-        health: { problems: ["kanalga kirib bo'lmayapti"], healed: false },
+        health: { problems: ["kanalga kirib bo'lmayapti"], disabled: false },
       })
     );
     expect(panel).toContain("🚨 <b>NOSOZLIK:</b>");

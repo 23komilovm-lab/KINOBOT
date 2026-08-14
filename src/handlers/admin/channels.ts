@@ -257,7 +257,7 @@ export interface ChannelStatsData {
    * Sog'liq tekshiruvi natijasi — muammolar TAYYOR MATN ko'rinishida
    * (`PROBLEM_LABEL` bilan yechilgan), shunda panel quruvchisi sof qoladi.
    */
-  health?: { problems: string[]; healed: boolean };
+  health?: { problems: string[]; disabled: boolean };
 }
 
 /**
@@ -287,7 +287,10 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
     s.health && s.health.problems.length > 0
       ? `\n\n🚨 <b>NOSOZLIK:</b>\n` +
         s.health.problems.map((p) => `  • ${p}`).join("\n") +
-        (s.health.healed ? `\n  ✅ Havola avtomatik almashtirildi.` : "")
+        (s.health.disabled
+          ? `\n  ⛔️ Majburiy obuna vaqtincha o'chirildi — bot ishlashda davom etyapti.` +
+            `\n  <i>Tuzatgach o'zi qayta yoqiladi.</i>`
+          : "")
       : "";
 
   const header =
@@ -393,10 +396,10 @@ async function renderChannelDetail(ctx: MyContext, id: number, opts: { recheck?:
   // Sog'liq: odatda davriy sweep keshidan olinadi (panel tez ochilsin).
   // "🔄 Yangilash" bosilganda yangidan tekshiriladi.
   const rawHealth = opts.recheck
-    ? await checkChannelHealth(ctx.api, c, ctx.me.id, { autoHeal: true })
+    ? await checkChannelHealth(ctx.api, c, ctx.me.id, { act: true })
     : getCachedHealth(c.chatId);
   const health = rawHealth
-    ? { problems: rawHealth.problems.map((p) => PROBLEM_LABEL[p]), healed: rawHealth.healed }
+    ? { problems: rawHealth.problems.map((p) => PROBLEM_LABEL[p]), disabled: rawHealth.disabled }
     : undefined;
 
   // INSTAGRAM: statistika umuman hisoblanmaydi (ma'nosiz "0" ko'rinmasin).
@@ -502,7 +505,7 @@ async function renderChannelDetail(ctx: MyContext, id: number, opts: { recheck?:
       ibtn("🔗 Havolalar", `ch:links:${c.id}`, "success"),
     ]);
     rows.push([
-      ibtn("♻️ Yangi havola", `ch:newlink:${c.id}`, "primary"),
+      ibtn("♻️ Yangi havola", `ch:newlinkask:${c.id}`, "primary"),
       ibtn("📎 Havolani ulash", `ch:setlink:${c.id}`, "primary"),
     ]);
   }
@@ -540,11 +543,11 @@ async function renderInviteLinks(ctx: MyContext, id: number) {
   await ctx
     .editMessageText(text, {
       link_preview_options: { is_disabled: true },
+      // BU EKRANDA HAVOLA ALMASHTIRADIGAN TUGMA YO'Q. Statistikani ko'rish
+      // oqimida "Yangilash" yonida turgan "Yangi havola" tasodifan bosiladi va
+      // eski havolani o'ldiradi — odamlar "havola yaroqsiz" xabarini oladi.
       reply_markup: kb(
-        [
-          ibtn("🔄 Yangilash", `ch:links:${id}`, "primary"),
-          ibtn("♻️ Yangi havola", `ch:newlink:${id}:links`, "success"),
-        ],
+        [ibtn("🔄 Yangilash", `ch:links:${id}`, "primary")],
         [ibtn("Orqaga", `ch:view:${id}`, undefined, BE.backMenu)]
       ),
     })
@@ -577,6 +580,9 @@ channelsHandler.callbackQuery(/^ch:subtoggle:(\d+)$/, async (ctx) => {
   }
   const next = !c.isActive;
   await prisma.channel.update({ where: { id }, data: { isActive: next } });
+  // Egasi qo'lda qaror qildi — sog'liq tekshiruvining "biz o'chirgan edik"
+  // belgisi olib tashlanadi, aks holda u keyinroq holatni o'zicha qaytarardi.
+  await setSetting(`chhealth:off:${c.chatId}`, "");
   await ctx.answerCallbackQuery({
     text: next
       ? `✅ "${c.title}" — majburiy obuna YOQILDI`
@@ -620,10 +626,39 @@ channelsHandler.callbackQuery("ch:editlabel:cancel", async (ctx) => {
 // qo'shilish yozuvlarida aynan qaysi havola ishlatilgani saqlanadi — shu tufayli
 // "eski havola orqali qancha, yangisi orqali qancha" ajratib ko'rsatiladi.
 
-/** Yangi "bot_tracking" havolasi yaratadi, eskisini bekor qiladi (registrda qoladi) */
-channelsHandler.callbackQuery(/^ch:newlink:(\d+)(:links)?$/, async (ctx) => {
+/**
+ * TASDIQ SO'RAYDI. Havolani almashtirish — qaytarib bo'lmaydigan amal: eski
+ * havola Telegram'da o'ladi va uni saqlab qo'ygan/reklamaga joylagan odamlar
+ * "havola yaroqsiz" xabarini oladi. Tasdiqsiz tugma tasodifan bosilardi.
+ */
+channelsHandler.callbackQuery(/^ch:newlinkask:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
-  const backToLinks = !!ctx.match[2];
+  const ch = await prisma.channel.findUnique({ where: { id } });
+  if (!ch) {
+    await ctx.answerCallbackQuery({ text: "Topilmadi.", show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  await ctx
+    .editMessageText(
+      `♻️ <b>${e.escapeHtml(ch.title)}</b> uchun yangi tracking havolasi?\n\n` +
+        `⚠️ Hozirgi havola <b>BEKOR QILINADI</b>. Uni saqlab qo'ygan yoki ` +
+        `reklamaga joylagan odamlar «havola yaroqsiz» xabarini oladi.\n\n` +
+        `Statistikasi yo'qolmaydi — eski havola hisobi «🔗 Havolalar» ekranida qoladi.\n\n` +
+        `Havola ishlayotgan bo'lsa — almashtirmang.`,
+      {
+        reply_markup: kb(
+          [ibtn("Ha, yangisini yarat", `ch:newlink:${id}`, "danger")],
+          [ibtn("Bekor qilish", `ch:view:${id}`, "success", BE.backMenu)]
+        ),
+      }
+    )
+    .catch(() => {});
+});
+
+/** Yangi "bot_tracking" havolasi yaratadi, eskisini bekor qiladi (registrda qoladi) */
+channelsHandler.callbackQuery(/^ch:newlink:(\d+)$/, async (ctx) => {
+  const id = Number(ctx.match[1]);
   const ch = await prisma.channel.findUnique({ where: { id } });
   if (!ch || ch.type === "INSTAGRAM") {
     await ctx.answerCallbackQuery({ text: "Topilmadi.", show_alert: true });
@@ -663,11 +698,18 @@ channelsHandler.callbackQuery(/^ch:newlink:(\d+)(:links)?$/, async (ctx) => {
     });
     return;
   }
-  if (backToLinks) await renderInviteLinks(ctx, id);
-  else await renderChannelDetail(ctx, id);
+  await renderChannelDetail(ctx, id);
 });
 
-/** Mavjud havolani ulash — faqat BOT yaratgan havola qabul qilinadi */
+/**
+ * Mavjud havolani ulash. Ikki xil havola qabul qilinadi:
+ *  · BOT yaratgan → `botInviteLink`, to'liq atributsiya ("🤖 Bot" deb sanaladi)
+ *  · ADMIN yaratgan → `inviteLink`, darvoza tugmasi shuni beradi, lekin
+ *    atributsiya cheklangan: Telegram boshqa admin yaratgan havola satrini
+ *    niqoblaydi va `creator.id` bot emas, shuning uchun u orqali kelganlar
+ *    "🔗 Havola" bucket'iga tushadi. Bunday havola hisobini egasi Telegram'ning
+ *    o'z statistikasida ko'radi.
+ */
 channelsHandler.callbackQuery(/^ch:setlink:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   const ch = await prisma.channel.findUnique({ where: { id } });
@@ -678,12 +720,15 @@ channelsHandler.callbackQuery(/^ch:setlink:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   ctx.session.scratch = { setChannelLink: id };
   await ctx.reply(
-    `<b>${e.escapeHtml(ch.title)}</b> uchun tracking havolasini yuboring.\n\n` +
-      `Hozirgi: <code>${e.escapeHtml(ch.botInviteLink ?? "(yo'q)")}</code>\n\n` +
-      `⚠️ Faqat <b>shu bot yaratgan</b> havola qabul qilinadi. Telegram boshqa ` +
-      `admin yaratgan havolani botga niqoblab ko'rsatadi ("…"), shuning uchun ` +
-      `o'zingiz yaratgan havola statistikada ishlamaydi.\n\n` +
-      `Kanal sozlamalari → Taklif havolalari → bot nomidagi havolani nusxalang.`,
+    `<b>${e.escapeHtml(ch.title)}</b> uchun havolani yuboring.\n\n` +
+      `Bot havolasi: <code>${e.escapeHtml(ch.botInviteLink ?? "(yo'q)")}</code>\n` +
+      `Zaxira havola: <code>${e.escapeHtml(ch.inviteLink ?? "(yo'q)")}</code>\n\n` +
+      `<b>Ikkala xil havola ham bo'ladi:</b>\n` +
+      `• <b>Bot yaratgan</b> havola — qo'shilishlar «🤖 Bot orqali» deb aniq sanaladi.\n` +
+      `• <b>O'zingiz yaratgan</b> havola — ham ishlaydi, lekin Telegram uni botga ` +
+      `niqoblab ko'rsatadi, shuning uchun statistikada «🔗 Havola» deb sanaladi. ` +
+      `Uning hisobini Telegram'ning o'zida ko'rasiz.\n\n` +
+      `Bot havolangizni qaysi turdaligini o'zi aniqlaydi — shunchaki yuboring.`,
     { reply_markup: kb([ibtn("Bekor qilish", "ch:setlink:cancel", "danger")]) }
   );
 });
@@ -941,28 +986,49 @@ channelsHandler.on("message", async (ctx, next) => {
       );
       return;
     }
-    // EGALIKNI TEKSHIRISH: editChatInviteLink faqat BOT yaratgan (va birlamchi
-    // bo'lmagan) havolani tahrirlaydi — muvaffaqiyat = havola rostdan botniki.
+    // EGALIKNI ANIQLASH: `editChatInviteLink` faqat BOT yaratgan (va birlamchi
+    // bo'lmagan) havolani tahrirlaydi — muvaffaqiyat = havola botniki.
     // Yon ta'siri: havolaga "bot_tracking" nomi qo'yiladi, muddat/a'zo limiti
-    // tozalanadi (tracking havolasi uchun aynan shu kerak).
-    try {
-      await ctx.api.editChatInviteLink(Number(ch.chatId), msgText, { name: "bot_tracking" });
-    } catch (err) {
+    // tozalanadi. So'rovli kanalda `creates_join_request` UZATILISHI SHART,
+    // aks holda havola tasdiqlash navbatini chetlab o'tadigan bo'lib qoladi.
+    const isBotLink = await ctx.api
+      .editChatInviteLink(Number(ch.chatId), msgText, {
+        name: "bot_tracking",
+        creates_join_request: ch.type === "REQUEST",
+      })
+      .then(() => true)
+      .catch(() => false);
+
+    if (isBotLink) {
+      if (ch.botInviteLink && ch.botInviteLink !== msgText) {
+        await markInviteLinkRevoked(ch.botInviteLink);
+      }
+      await prisma.channel.update({ where: { id: setLinkId }, data: { botInviteLink: msgText } });
+      await registerInviteLink(ch.chatId, msgText, "bot_tracking");
+      ctx.session.scratch = {};
       await ctx.reply(
-        `❌ Bu havolani bot tahrirlay olmadi: <code>${e.escapeHtml((err as Error).message)}</code>\n\n` +
-          `Demak uni bot yaratmagan (yoki bu botning birlamchi havolasi). Statistika ` +
-          `ishlashi uchun havolani bot yaratishi kerak — "♻️ Yangi havola" tugmasidan foydalaning.`
+        `${ce("check")} <b>Bot havolasi</b> ulandi:\n<code>${e.escapeHtml(msgText)}</code>\n\n` +
+          `Bu havola orqali kelganlar «🤖 Bot orqali» deb aniq sanaladi.`
       );
       return;
     }
-    if (ch.botInviteLink && ch.botInviteLink !== msgText) {
-      await markInviteLinkRevoked(ch.botInviteLink);
-    }
-    await prisma.channel.update({ where: { id: setLinkId }, data: { botInviteLink: msgText } });
-    await registerInviteLink(ch.chatId, msgText, "bot_tracking");
+
+    // ADMIN yaratgan havola. Uni ham qabul qilamiz — darvoza tugmasi shuni
+    // beradi. Atributsiya cheklangan: Telegram bunday havola satrini niqoblaydi
+    // va `creator.id` bot emas, shuning uchun qo'shilishlar "🔗 Havola"
+    // bucket'iga tushadi. Havola hisobini egasi Telegram'ning o'zida ko'radi.
+    await prisma.channel.update({ where: { id: setLinkId }, data: { inviteLink: msgText } });
+    await registerInviteLink(ch.chatId, msgText, "majburiy_obuna");
     ctx.session.scratch = {};
     await ctx.reply(
-      `${ce("check")} Tracking havolasi ulandi:\n<code>${e.escapeHtml(msgText)}</code>`
+      `${ce("check")} <b>O'z havolangiz</b> ulandi:\n<code>${e.escapeHtml(msgText)}</code>\n\n` +
+        `ℹ️ Bu havolani bot yaratmagan, shuning uchun u orqali kelganlar ` +
+        `statistikada «🔗 Havola» deb sanaladi — «🤖 Bot orqali» emas. ` +
+        `Aniq hisobni Telegram'ning o'zida (Kanal → Taklif havolalari) ko'rasiz.` +
+        (ch.botInviteLink
+          ? `\n\n⚠️ Kanalda bot havolasi ham bor va darvoza tugmasi <b>o'shani</b> beradi. ` +
+            `Sizning havolangiz faqat bot havolasi bo'lmaganda ishlatiladi.`
+          : "")
     );
     return;
   }
