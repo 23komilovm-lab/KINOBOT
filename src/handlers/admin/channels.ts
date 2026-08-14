@@ -31,7 +31,6 @@ import {
   registerInviteLink,
 } from "../../utils/inviteLinks.js";
 import { rebuildMemberSnapshot } from "../../utils/channelEvents.js";
-import { channelUrl } from "../../utils/subscription.js";
 import {
   PROBLEM_LABEL,
   UNLIMITED_MEMBER_LIMIT,
@@ -352,18 +351,9 @@ export function buildChannelStatsPanel(c: Channel, s: ChannelStatsData): string 
           : "")
       : "";
 
-  // "Tur" yorlig'i BOSILADIGAN HAVOLA: admin kanalning o'zini ko'rish uchun
-  // ro'yxatga qaytib, username qidirmasin — bir bosishda kanalga o'tsin.
-  // channelUrl() ustunlik tartibi: bot tracking havolasi → @username →
-  // zaxira havola (subscription.ts, foydalanuvchi ko'radigan tugma bilan bir xil).
-  const url = channelUrl(c);
-  const typeLabel = url
-    ? `<a href="${e.escapeHtml(url)}"><b>${TYPE_LABEL[c.type]}</b></a>`
-    : `<b>${TYPE_LABEL[c.type]}</b>`;
-
   const header =
     `<tg-emoji emoji-id="${BE.channel}">📢</tg-emoji> <b>${e.escapeHtml(c.title)}</b>\n` +
-    `Tur: ${typeLabel}\n` +
+    `Tur: <b>${TYPE_LABEL[c.type]}</b>\n` +
     `<code>${e.escapeHtml(handle)}</code>\n` +
     `Majburiy obuna: <b>${c.isActive ? "🟢 Yoqilgan" : "🔴 O'chirilgan"}</b>` +
     healthBlock;

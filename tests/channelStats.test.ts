@@ -478,37 +478,6 @@ describe("buildChannelStatsPanel", () => {
     expect(panel).toContain("Zayifkalar");
   });
 
-  // ---- "Tur" yorlig'i — bosiladigan havola ----
-  it("username bor kanalda 'Tur' yorlig'i kanalga havola bo'ladi", () => {
-    const panel = buildChannelStatsPanel(chan({ username: "kino_kanal" }), stats());
-    expect(panel).toContain('<a href="https://t.me/kino_kanal"><b>Ommaviy</b></a>');
-  });
-
-  it("bot tracking havolasi bo'lsa o'sha ustun turadi (username emas)", () => {
-    // channelUrl() ustunligi: bot tracking havolasi > @username. Foydalanuvchi
-    // ko'radigan obuna tugmasi bilan bir xil tartib (subscription.ts).
-    const panel = buildChannelStatsPanel(
-      chan({ username: "kino_kanal", botInviteLink: "https://t.me/+trackingLink" }),
-      stats()
-    );
-    expect(panel).toContain('<a href="https://t.me/+trackingLink"><b>Ommaviy</b></a>');
-  });
-
-  it("hech qanday havola yo'q bo'lsa 'Tur' oddiy matn — bosilmaydigan qiladigan <a> yo'q", () => {
-    const panel = buildChannelStatsPanel(chan({ username: null, inviteLink: null }), stats());
-    expect(panel).not.toContain("<a href=");
-    expect(panel).toContain("Tur: <b>Ommaviy</b>");
-  });
-
-  it("havola manzili HTML'dan xavfsiz (escape qilinadi)", () => {
-    // username formati Telegram tomonidan cheklangan, lekin himoya baribir kerak
-    const panel = buildChannelStatsPanel(
-      chan({ username: null, inviteLink: 'https://evil.test/"><script>' }),
-      stats()
-    );
-    expect(panel).not.toContain('"><script>');
-  });
-
   it("sarlavha HTML'dan xavfsiz (escape qilinadi)", () => {
     const panel = buildChannelStatsPanel(chan({ title: 'A & B <b>x</b> "q"' }), stats());
     expect(panel).not.toContain("A & B <b>");
