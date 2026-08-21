@@ -3,17 +3,16 @@ import { getSetting, KEYS } from "../utils/settings.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AI PROVAYDER REGISTRI
-// Barcha provayderlar (Gemini'dan tashqari) OpenAI-mos chat completions API.
+// Barcha provayderlar OpenAI-mos chat completions API.
 // Kalit yo'q provayder avtomatik "mavjud emas" bo'ladi.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ProviderId = "groq" | "openrouter" | "mistral" | "gemini";
+export type ProviderId = "groq" | "openrouter" | "mistral";
 
 interface Provider {
   id: ProviderId;
   label: string;
-  style: "openai" | "gemini";
-  baseUrl: string; // OpenAI-mos uchun to'liq chat completions URL
+  baseUrl: string; // to'liq chat completions URL
   key: () => string; // API kalit (bo'sh bo'lsa — mavjud emas)
   models: { id: string; label: string }[];
 }
@@ -22,19 +21,21 @@ export const PROVIDERS: Provider[] = [
   {
     id: "groq",
     label: "Groq",
-    style: "openai",
     baseUrl: "https://api.groq.com/openai/v1/chat/completions",
     key: () => config.groqApiKey,
+    // Llama modellar (llama-3.3-70b-versatile, llama-3.1-8b-instant) Groq'dan
+    // OLIB TASHLANGAN (2026-08-21) — prodda har bir so'rov 404 model_not_found
+    // berardi. O'rniga gpt-oss oilasi qo'yildi — jonli sinovdan o'tgan
+    // (reasoning alohida maydonda qaytadi, content toza qoladi).
     models: [
-      { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (sifatli)" },
-      { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B (tez, katta limit)" },
+      { id: "openai/gpt-oss-120b", label: "GPT OSS 120B (sifatli)" },
+      { id: "openai/gpt-oss-20b", label: "GPT OSS 20B (tez)" },
       { id: "groq/compound-mini", label: "Compound Mini" },
     ],
   },
   {
     id: "openrouter",
     label: "OpenRouter",
-    style: "openai",
     baseUrl: "https://openrouter.ai/api/v1/chat/completions",
     key: () => config.openrouterApiKey,
     models: [
@@ -56,7 +57,6 @@ export const PROVIDERS: Provider[] = [
   {
     id: "mistral",
     label: "Mistral",
-    style: "openai",
     baseUrl: "https://api.mistral.ai/v1/chat/completions",
     key: () => config.mistralApiKey,
     models: [
@@ -64,20 +64,12 @@ export const PROVIDERS: Provider[] = [
       { id: "mistral-small-latest", label: "Mistral Small" },
     ],
   },
-  {
-    id: "gemini",
-    label: "Google Gemini",
-    style: "gemini",
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
-    key: () => config.geminiApiKey,
-    // Gemini 2.0 oilasi 2026-06-01 da BUTUNLAY o'chirilgan (404 "no longer
-    // available") — prodda har bir Gemini so'rovi shu yerda yiqilardi.
-    // 3.x tanlandi: 2.5 uchun 2026-10-16 da yana majburiy ko'chish bor.
-    models: [
-      { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash — rasm ham" },
-      { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite (arzon)" },
-    ],
-  },
+  // Google Gemini OLIB TASHLANDI (2026-08-21):
+  //  - Avval 2.0 oilasi o'chirilgandi (2026-06-01), 3.x ga o'tilgandi.
+  //  - Endi Google loyiha o'zi BLOKLANGAN — har bir so'rov 403
+  //    PERMISSION_DENIED "Your project has been denied access" qaytaradi.
+  //    Kalitni almashtirish uchun yangi Google Cloud loyihasi kerak; qayta
+  //    qo'shishda git tarixidagi eski Provider blokidan nusxa olish yetarli.
 ];
 
 export function getProvider(id: string): Provider | undefined {
@@ -154,32 +146,18 @@ async function fetchResilient(url: string, init: RequestInit): Promise<Response>
 
 // Vision-qobiliyatli modellar (ustuvorlik tartibida). Faqat kaliti bor bo'lsa ishlatiladi.
 //
-// DIQQAT: bu ro'yxatdagi modellar 2026-07-29 da jonli sinovdan o'tkazilgan —
-// haqiqiy rasm yuborilib, javob to'g'riligi tekshirilgan. Bepul model nomlari
-// tez-tez o'zgaradi (eski ro'yxatdagi hammasi 404/429 bergan va rasm orqali
-// qidiruv umuman ishlamay qolgan edi), shuning uchun o'zgartirishdan oldin
-// har bir modelni albatta sinab ko'ring.
+// DIQQAT: bepul model nomlari tez-tez o'zgaradi — o'zgartirishdan oldin har bir
+// modelni jonli rasm bilan albatta sinab ko'ring.
 //
 // "Reasoning" modellari ataylab qo'shilmagan — ular javobga <think> kabi
 // izohlarni aralashtirib, TITLE:/YEAR:/INFO: formatini buzadi.
-// Groq'da 2026-07 holatiga ko'ra umuman vision modeli yo'q.
-// Tartib SIFAT bo'yicha: kino posterini tanish og'ir vazifa, shuning uchun eng
-// kuchli model birinchi (matn oqimida esa Groq birinchi — u yerda hajm muhimroq).
-// Ilgari zanjirning IKKITA BIRINCHI bandi GitHub Models edi — u 410 qaytargani
-// uchun rasm orqali qidirish amalda hech qachon ishlamasdi. GitHub olib
-// tashlandi, boshiga Gemini qo'yildi.
+// Gemini bandi OLIB TASHLANDI (2026-08-21) — Google loyihasi bloklangan (403).
 const VISION_MODELS: { provider: ProviderId; model: string }[] = [
-  { provider: "gemini", model: "gemini-3.6-flash" },
   { provider: "openrouter", model: "google/gemma-4-26b-a4b-it:free" },
   { provider: "openrouter", model: "nvidia/nemotron-nano-12b-v2-vl:free" },
   { provider: "mistral", model: "pixtral-12b-latest" },
   { provider: "openrouter", model: "openrouter/free" },
 ];
-
-function parseDataUrl(dataUrl: string): { mime: string; base64: string } | null {
-  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-  return m ? { mime: m[1], base64: m[2] } : null;
-}
 
 // ─── OpenAI-mos so'rov (tarix + rasm) ────────────────────────────────────────
 async function callOpenAI(p: Provider, model: string, opts: AiCallOpts): Promise<AiResult | null> {
@@ -237,66 +215,13 @@ async function callOpenAI(p: Provider, model: string, opts: AiCallOpts): Promise
   }
 }
 
-// ─── Gemini so'rov (tarix + rasm) ────────────────────────────────────────────
-async function callGemini(p: Provider, model: string, opts: AiCallOpts): Promise<AiResult | null> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const contents: any[] = (opts.history ?? []).map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const lastParts: any[] = [{ text: opts.userText }];
-    if (opts.imageDataUrl) {
-      const img = parseDataUrl(opts.imageDataUrl);
-      if (img) lastParts.push({ inlineData: { mimeType: img.mime, data: img.base64 } });
-    }
-    contents.push({ role: "user", parts: lastParts });
-
-    const url = `${p.baseUrl}/${model}:generateContent?key=${p.key()}`;
-    const res = await fetchResilient(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents,
-        ...(opts.system ? { systemInstruction: { parts: [{ text: opts.system }] } } : {}),
-        generationConfig: { temperature: 0.7, maxOutputTokens: opts.maxTokens ?? 800 },
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      const msg = `${res.status} ${res.statusText} — ${body.slice(0, 300)}`;
-      lastProviderError.set(p.id, msg);
-      console.error(`🤖 Gemini (${model}) xato: ${msg}`);
-      return null;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: any = await res.json();
-    const parts = data?.candidates?.[0]?.content?.parts;
-    if (!Array.isArray(parts)) return null;
-    const text = parts
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((x: any) => x.text ?? "")
-      .join("")
-      .trim();
-    if (!text) return null;
-    const tokens = data?.usageMetadata?.totalTokenCount ?? 0;
-    lastProviderError.delete(p.id);
-    return { text, provider: p.id, model, tokens };
-  } catch (err) {
-    lastProviderError.set(p.id, (err as Error).message);
-    console.error(`🤖 Gemini (${model}) so'rov xatosi:`, (err as Error).message);
-    return null;
-  }
-}
-
 async function callProvider(
   p: Provider,
   model: string,
   opts: AiCallOpts
 ): Promise<AiResult | null> {
   if (!p.key()) return null;
-  return p.style === "gemini" ? callGemini(p, model, opts) : callOpenAI(p, model, opts);
+  return callOpenAI(p, model, opts);
 }
 
 /** Matn scope uchun sinov tartibi: sozlangan model + har mavjud provayder models[0] */

@@ -190,11 +190,11 @@ function adminSystemPrompt(stats: string, userInfo: string): string {
     `ko'rsatadi, admin tasdiqlagandan keyingina yuboriladi.\n\n` +
     `━━━ SOZLAMALARNI O'ZGARTIRISH ━━━\n` +
     `Agar admin bot SOZLAMASINI o'zgartirishni so'rasa (masalan "majburiy obunani o'chir", ` +
-    `"foydalanuvchi AI modelini gemini qil"), javobing OXIRIGA quyidagicha qo'sh:\n` +
+    `"foydalanuvchi AI modelini groq qil"), javobing OXIRIGA quyidagicha qo'sh:\n` +
     `[SETTING:kalit=qiymat] (bir nechta bo'lsa har birini alohida qatorda).\n` +
     `FAQAT quyidagi ruxsat etilgan kalitlardan foydalan (boshqasini YOZMA):\n${settingsWhitelistText()}\n` +
     `bool kalitlar uchun qiymat: 1 (yoq) yoki 0 (o'chir). Model kalitlari uchun "provider:model" ` +
-    `formatida (masalan gemini:gemini-3.6-flash). O'zgarishni O'ZING QO'LLAMAYSAN — bot adminga ` +
+    `formatida (masalan groq:openai/gpt-oss-20b). O'zgarishni O'ZING QO'LLAMAYSAN — bot adminga ` +
     `tasdiqlash tugmalarini ko'rsatadi, tasdiqdan keyin qo'llaydi. Blokdan oldin qisqa izoh yozishing mumkin.\n\n` +
     `Endi adminga eng yaxshi tarzda yordam ber!`
   );

@@ -21,7 +21,7 @@ export const config = {
   paymentChannelId: process.env.PAYMENT_CHANNEL_ID ? Number(process.env.PAYMENT_CHANNEL_ID) : null,
   usePremiumEmoji: (process.env.USE_PREMIUM_EMOJI ?? "true") === "true",
   // AI provayder kalitlari (ixtiyoriy — qaysi biri bo'lsa o'sha ishlaydi)
-  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
+  // GEMINI_API_KEY olib tashlandi (2026-08-21) — Google loyihasi bloklangan (403)
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   openrouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
