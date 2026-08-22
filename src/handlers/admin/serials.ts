@@ -120,7 +120,7 @@ export async function addSerial(conversation: Conversation<MyContext>, ctx: MyCo
 
   await ctx.reply(
     `${ce("check")} Serial qo'shildi: <b>${e.escapeHtml(serial.title)}</b> (kod <code>${serial.code}</code>)\n` +
-      `Endi "🎞 Qism qo'shish" orqali sezon va qismlarni qo'shing.`,
+      `Endi "🎞 Qism qo'shish" orqali qismlarni qo'shing.`,
     { reply_markup: adminMenuKeyboard(ctx.from?.id) }
   );
 }
@@ -168,42 +168,10 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   const serial = serials.find((s) => s.id === serialId)!;
   const serialTitle = serial.title;
 
-  // ── 2️⃣ Sezonni TUGMA orqali tanlash (yoki yangi qo'shish) ──
-  const seasons = await conversation.external(() =>
-    prisma.season.findMany({
-      where: { serialId },
-      orderBy: { number: "asc" },
-      select: { number: true, _count: { select: { episodes: true } } },
-    })
-  );
+  // Sezon alohida tanlanmaydi — barcha yangi qismlar 1-sezonga yoziladi.
+  const seasonNum = 1;
 
-  const seasonRows = seasons.map((s) => [
-    ibtn(
-      `${s.number}-sezon (${s._count.episodes} qism)`,
-      `ep:se:${s.number}`,
-      "primary",
-      BE.folder
-    ),
-  ]);
-  const nextSeason = seasons.length ? Math.max(...seasons.map((s) => s.number)) + 1 : 1;
-  seasonRows.push([
-    ibtn(`➕ Yangi sezon (${nextSeason})`, `ep:se:${nextSeason}`, "success", BE.chAdd),
-  ]);
-  seasonRows.push([ibtn("❌ Bekor qilish", "ep:cancel", "danger")]);
-
-  await ctx.reply(
-    `<b>${e.escapeHtml(serialTitle)}</b>\n\n2️⃣ Qaysi sezon?` +
-      (seasons.length === 0 ? `\n\n<i>Hozircha sezon yo'q — yangi sezon qo'shiladi.</i>` : ""),
-    { reply_markup: kb(...seasonRows) }
-  );
-
-  const sePick = await conversation.waitForCallbackQuery(/^ep:(se:\d+|cancel)$/);
-  await sePick.answerCallbackQuery();
-  if (sePick.callbackQuery.data === "ep:cancel") return stop(sePick);
-
-  const seasonNum = Number(sePick.callbackQuery.data.split(":")[2]);
-
-  // ── 3️⃣ Qism raqami — keyingisi avtomatik taklif qilinadi ──
+  // ── 2️⃣ Qism raqami — keyingisi avtomatik taklif qilinadi ──
   const lastEp = await conversation.external(() =>
     prisma.episode.findFirst({
       where: { season: { serialId, number: seasonNum } },
@@ -214,8 +182,8 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
   const suggested = (lastEp?.number ?? 0) + 1;
 
   await ctx.reply(
-    `<b>${e.escapeHtml(serialTitle)}</b> — ${seasonNum}-sezon\n\n` +
-      `3️⃣ <b>Qism</b> raqami: keyingisi <b>${suggested}</b>.\n\n` +
+    `<b>${e.escapeHtml(serialTitle)}</b>\n\n` +
+      `2️⃣ <b>Qism</b> raqami: keyingisi <b>${suggested}</b>.\n\n` +
       `Shu bo'lsa <code>+</code> deb yuboring, yoki boshqa raqam yozing.`,
     { reply_markup: cancelKeyboard() }
   );
@@ -237,7 +205,7 @@ export async function addEpisode(conversation: Conversation<MyContext>, ctx: MyC
     break;
   }
 
-  await ctx.reply(`4️⃣ Endi <b>${seasonNum}-sezon ${epNum}-qism</b> videosini yuboring.`);
+  await ctx.reply(`3️⃣ Endi <b>${epNum}-qism</b> videosini yuboring.`);
   // Video o'rniga boshqa kontent kelsa qo'shish BOSHLANGANCHA bekor bo'lmasin —
   // qayta so'raladi, faqat aniq cancel'da tugaydi.
   let fileId = "";

@@ -292,6 +292,7 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   // "tashlanmadi" deb ko'rsatilardi.
   let basePosted = false;
   if (config.baseChannelId) {
+    let baseMsgId: number | null = null;
     try {
       // conversation.external + bot.api: suhbat ichidagi `ctx.api` chaqiruvi
       // qayta o'ynatishda Telegram'ga ketmay, log'dan bo'sh javob olishi mumkin.
@@ -301,15 +302,19 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
         })
       );
       basePosted = true;
-      const baseMsgId = sent?.message_id && sent.message_id > 0 ? sent.message_id : null;
-      if (baseMsgId) {
-        await conversation.external(() =>
-          prisma.movie.update({ where: { id: movie.id }, data: { baseMsgId } })
-        );
-      }
+      baseMsgId = sent?.message_id && sent.message_id > 0 ? sent.message_id : null;
     } catch (err) {
       console.error(`🛑 Kino baza kanalga tashlanmadi (kod ${code}):`, err);
       await ctx.reply(`⚠️ Baza kanalga tashlab bo'lmadi: ${e.escapeHtml(describeError(err))}`);
+    }
+    if (basePosted && baseMsgId) {
+      try {
+        await conversation.external(() =>
+          prisma.movie.update({ where: { id: movie.id }, data: { baseMsgId } })
+        );
+      } catch (err) {
+        console.error(`⚠️ Kino posti yuborildi, lekin ID saqlanmadi (kod ${code}):`, err);
+      }
     }
   }
 
@@ -334,7 +339,7 @@ export async function addMovie(conversation: Conversation<MyContext>, ctx: MyCon
   }
 
   await ctx.reply(
-    `${ce("check")} <b>Kino qo'shildi!</b>\n\n` +
+    `✅ <b>Kino qo'shildi!</b>\n\n` +
       `🎬 ${e.escapeHtml(movie.title)}\n` +
       `${ce("star")} Kod: <code>${movie.code}</code>\n` +
       (basePosted ? `📦 Baza kanalga tashlandi.\n` : `ℹ️ Baza kanalga tashlanmadi.\n`) +
